@@ -58,6 +58,12 @@ public class MimeMessageAssembler {
 
     private static final String SUBTYPE_PLAIN = "plain";
 
+    private static final String MESSAGE_ID_HEADER = "Message-ID";
+
+    private static final String MESSAGE_ID_FORMAT = "<%s@%s>";
+
+    private static final char ADDRESS_SEPARATOR = '@';
+
     private static final String PRIORITY_HEADER = "X-Priority";
 
     private static final String IMPORTANCE_HEADER = "Importance";
@@ -98,6 +104,9 @@ public class MimeMessageAssembler {
         List<Attachment> regular = filter(email.attachments(), AttachmentDisposition.ATTACHMENT);
         fillMixed(target, message.body(), inline, regular);
         target.saveChanges();
+        // Один и тот же идентификатор во всех попытках: по нему получатель может отбросить повторную доставку.
+        // Ставится после saveChanges, иначе библиотека заменит его случайным
+        target.setHeader(MESSAGE_ID_HEADER, MESSAGE_ID_FORMAT.formatted(email.id(), domainOf(message.from())));
     }
 
     private void fillMixed(
@@ -192,6 +201,10 @@ public class MimeMessageAssembler {
         InternetAddress address = new InternetAddress(mailbox.address(), mailbox.name(), CHARSET);
         address.validate();
         return address;
+    }
+
+    private static String domainOf(Mailbox mailbox) {
+        return mailbox.address().substring(mailbox.address().lastIndexOf(ADDRESS_SEPARATOR) + 1);
     }
 
     private static List<Attachment> filter(List<Attachment> attachments, AttachmentDisposition disposition) {

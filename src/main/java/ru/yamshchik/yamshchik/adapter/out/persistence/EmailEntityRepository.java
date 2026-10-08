@@ -14,6 +14,8 @@ public interface EmailEntityRepository extends JpaRepository<EmailEntity, UUID> 
 
     Optional<EmailStateView> findStateById(UUID id);
 
+    long countByStatus(EmailStatus status);
+
     // У писем в конечном статусе available_at пуст, поэтому статус в условии не нужен.
     // SKIP LOCKED: параллельные обработчики не ждут друг друга и не получают одно и то же письмо
     @Query(value = """

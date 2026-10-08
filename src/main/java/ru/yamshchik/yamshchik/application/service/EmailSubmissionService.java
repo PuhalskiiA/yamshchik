@@ -2,14 +2,18 @@ package ru.yamshchik.yamshchik.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 import ru.yamshchik.yamshchik.application.port.in.SubmitEmailUseCase;
 import ru.yamshchik.yamshchik.application.port.out.AttachmentStorage;
 import ru.yamshchik.yamshchik.application.port.out.DispatchQueue;
+import ru.yamshchik.yamshchik.application.port.out.EmailMetrics;
 import ru.yamshchik.yamshchik.application.port.out.EmailRepository;
 import ru.yamshchik.yamshchik.application.port.out.EmailTransport;
 import ru.yamshchik.yamshchik.config.exception.type.EmailTooLargeException;
 import ru.yamshchik.yamshchik.config.exception.type.ServiceException;
 import ru.yamshchik.yamshchik.config.exception.type.ServiceValidationException;
+import ru.yamshchik.yamshchik.config.properties.IntakeProperties;
+import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
 import ru.yamshchik.yamshchik.domain.Attachment;
 import ru.yamshchik.yamshchik.domain.AttachmentContent;
 import ru.yamshchik.yamshchik.domain.BodyAlternative;
@@ -30,6 +34,7 @@ import java.util.HexFormat;
 import java.util.List;
 
 
+@Service
 @RequiredArgsConstructor
 @Slf4j
 public class EmailSubmissionService implements SubmitEmailUseCase {
@@ -58,7 +63,9 @@ public class EmailSubmissionService implements SubmitEmailUseCase {
 
     private final EmailTransport emailTransport;
 
-    private final SubmissionLimits limits;
+    private final YamshchikProperties properties;
+
+    private final EmailMetrics metrics;
 
     private final Clock clock;
 
@@ -73,32 +80,35 @@ public class EmailSubmissionService implements SubmitEmailUseCase {
 
         store(email, uploads);
         dispatchQueue.enqueue(state.id(), state.availableAt());
+        metrics.accepted();
         return state;
     }
 
     private void checkLimits(EmailMessage message, List<AttachmentUpload> uploads) {
+        IntakeProperties limits = properties.getIntake();
         Recipients recipients = message.recipients();
         int recipientCount = recipients.to().size() + recipients.cc().size() + recipients.bcc().size();
-        if (recipientCount > limits.maxRecipients()) {
+        if (recipientCount > limits.getMaxRecipients()) {
             throw new ServiceValidationException(
-                    "Too many recipients: %d, allowed %d".formatted(recipientCount, limits.maxRecipients()));
+                    "Too many recipients: %d, allowed %d".formatted(recipientCount, limits.getMaxRecipients()));
         }
-        if (uploads.size() > limits.maxAttachments()) {
+        if (uploads.size() > limits.getMaxAttachments()) {
             throw new ServiceValidationException(
-                    "Too many attachments: %d, allowed %d".formatted(uploads.size(), limits.maxAttachments()));
+                    "Too many attachments: %d, allowed %d".formatted(uploads.size(), limits.getMaxAttachments()));
         }
 
         String address = message.from().address();
         String senderDomain = address.substring(address.lastIndexOf(ADDRESS_SEPARATOR) + 1);
-        if (!limits.allowsSenderDomain(senderDomain)) {
+        List<String> allowedDomains = limits.getAllowedSenderDomains();
+        if (!allowedDomains.isEmpty() && allowedDomains.stream().noneMatch(senderDomain::equalsIgnoreCase)) {
             throw new ServiceValidationException("Sender domain is not allowed: " + senderDomain);
         }
 
         long encodedSize = estimateEncodedSize(message, uploads);
-        if (encodedSize > limits.maxMessageSizeBytes()) {
+        long maxSize = limits.getMaxMessageSize().toBytes();
+        if (encodedSize > maxSize) {
             throw new EmailTooLargeException(
-                    "Email is too large: about %d bytes after encoding, allowed %d"
-                            .formatted(encodedSize, limits.maxMessageSizeBytes()));
+                    "Email is too large: about %d bytes after encoding, allowed %d".formatted(encodedSize, maxSize));
         }
     }
 

@@ -1,10 +1,8 @@
+# Общие настройки. Всё, что зависит от стенда (адреса и учётные записи БД, почтового сервера
+# и хранилища вложений), лежит в application-<стенд>.yaml; для локального запуска — профиль local.
 spring:
   application:
     name: yamshchik
-  datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/yamshchik}
-    username: ${DB_USERNAME:yamshchik}
-    password: ${DB_PASSWORD:yamshchik}
   jpa:
     open-in-view: false
     hibernate:
@@ -12,10 +10,6 @@ spring:
   liquibase:
     change-log: classpath:/db/changelog/db.changelog-master.yaml
   mail:
-    host: ${SMTP_HOST:localhost}
-    port: ${SMTP_PORT:1025}
-    username: ${SMTP_USERNAME:}
-    password: ${SMTP_PASSWORD:}
     default-encoding: UTF-8
     properties:
       mail.mime.allowutf8: true
@@ -32,10 +26,17 @@ spring:
       max-file-size: 25MB
       max-request-size: 30MB
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
 yamshchik:
   dispatch:
     queue: ${DISPATCH_QUEUE:postgres}
     poll-interval: PT1S
+    workers: ${DISPATCH_WORKERS:4}
     lease: PT5M
     retry:
       policy: ${RETRY_POLICY:exponential}
@@ -47,10 +48,3 @@ yamshchik:
     max-recipients: 100
     max-attachments: 10
     allowed-sender-domains: ${ALLOWED_SENDER_DOMAINS:}
-  storage:
-    endpoint: ${S3_ENDPOINT:http://localhost:9000}
-    region: ${S3_REGION:us-east-1}
-    bucket: ${S3_BUCKET:yamshchik}
-    access-key: ${S3_ACCESS_KEY:yamshchik}
-    secret-key: ${S3_SECRET_KEY:yamshchik-secret}
-    path-style-access: true
