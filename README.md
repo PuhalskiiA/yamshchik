@@ -89,6 +89,7 @@ curl http://localhost:8080/api/v1/emails/{id}
 | `RETRY_POLICY` | `exponential` | Повторы: `exponential` — только временные отказы, пауза удваивается; `fixed` — любой отказ через одну и ту же паузу |
 | `RETRY_MAX_ATTEMPTS` | `5` | Сколько всего попыток, считая первую |
 | `RETRY_INITIAL_DELAY` / `RETRY_MAX_DELAY` | `PT30S` / `PT1H` | Пауза перед второй попыткой и предел её роста |
+| `ATTACHMENT_STORAGE` | `s3` | Где лежат вложения: `s3` — объектное хранилище; `filesystem` — каталог на диске экземпляра; `kafka` — топик Kafka (нужен `docker compose --profile kafka up -d --wait`) |
 | `DISPATCH_WORKERS` | `4` | Сколько обработчиков одновременно отправляют письма |
 | `DISPATCH_QUEUE` | `postgres` | Очередь отправки: `postgres` — в таблице писем, переживает рестарт; `memory` — в памяти процесса, при рестарте ждущие письма остаются в `ACCEPTED` и не отправляются |
 

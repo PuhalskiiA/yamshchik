@@ -166,10 +166,10 @@ public class EmailSubmissionService implements SubmitEmailUseCase {
         try {
             for (int position = 0; position < uploads.size(); position++) {
                 Attachment attachment = email.attachments().get(position);
-                attachmentStorage.store(attachment, uploads.get(position).content());
-                stored.add(attachment);
+                String storageKey = attachmentStorage.store(attachment, uploads.get(position).content());
+                stored.add(attachment.withStorageKey(storageKey));
             }
-            emailRepository.save(email);
+            emailRepository.save(new Email(email.state(), email.message(), stored));
         } catch (RuntimeException e) {
             stored.forEach(this::deleteQuietly);
             throw e;

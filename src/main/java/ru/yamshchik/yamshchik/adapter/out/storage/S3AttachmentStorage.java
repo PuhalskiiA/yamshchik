@@ -1,8 +1,10 @@
 package ru.yamshchik.yamshchik.adapter.out.storage;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import ru.yamshchik.yamshchik.application.port.out.AttachmentStorage;
 import ru.yamshchik.yamshchik.config.exception.type.AttachmentStorageException;
+import ru.yamshchik.yamshchik.config.properties.StorageProperties;
 import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
 import ru.yamshchik.yamshchik.domain.Attachment;
 import ru.yamshchik.yamshchik.domain.AttachmentContent;
@@ -19,6 +21,7 @@ import java.util.HexFormat;
 
 
 @Component
+@ConditionalOnProperty(name = StorageProperties.TYPE_PROPERTY, havingValue = StorageProperties.TYPE_S3)
 public class S3AttachmentStorage implements AttachmentStorage {
 
     private static final String MISSING_MESSAGE = "Attachment content is missing: ";
@@ -31,11 +34,11 @@ public class S3AttachmentStorage implements AttachmentStorage {
 
     public S3AttachmentStorage(S3Client s3Client, YamshchikProperties properties) {
         this.s3Client = s3Client;
-        this.bucket = properties.getStorage().getBucket();
+        this.bucket = properties.getStorage().getS3().getBucket();
     }
 
     @Override
-    public void store(Attachment attachment, AttachmentContent content) {
+    public String store(Attachment attachment, AttachmentContent content) {
         // Хранилище само сверяет принятое с контрольной суммой и отклоняет запись при расхождении
         String checksum = Base64.getEncoder().encodeToString(HexFormat.of().parseHex(attachment.sha256()));
         s3Client.putObject(
@@ -45,6 +48,7 @@ public class S3AttachmentStorage implements AttachmentStorage {
                         .checksumSHA256(checksum),
                 // Поставщик, а не готовый поток: при повторе запроса клиент откроет содержимое заново
                 RequestBody.fromContentProvider(() -> open(content), attachment.size(), attachment.mediaType()));
+        return attachment.storageKey();
     }
 
     @Override

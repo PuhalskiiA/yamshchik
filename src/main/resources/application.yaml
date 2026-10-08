@@ -48,3 +48,5 @@ yamshchik:
     max-recipients: 100
     max-attachments: 10
     allowed-sender-domains: ${ALLOWED_SENDER_DOMAINS:}
+  storage:
+    type: ${ATTACHMENT_STORAGE:s3}
