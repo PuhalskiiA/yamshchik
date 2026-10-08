@@ -2,12 +2,15 @@ package ru.yamshchik.yamshchik.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 import ru.yamshchik.yamshchik.application.port.in.DispatchEmailsUseCase;
 import ru.yamshchik.yamshchik.application.port.out.DispatchQueue;
+import ru.yamshchik.yamshchik.application.port.out.EmailMetrics;
 import ru.yamshchik.yamshchik.application.port.out.EmailRepository;
 import ru.yamshchik.yamshchik.application.port.out.EmailTransport;
 import ru.yamshchik.yamshchik.application.service.retry.RetryPolicy;
 import ru.yamshchik.yamshchik.config.exception.type.EmailTransportException;
+import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
 import ru.yamshchik.yamshchik.domain.DeliveryFailure;
 import ru.yamshchik.yamshchik.domain.Email;
 import ru.yamshchik.yamshchik.domain.EmailState;
@@ -19,6 +22,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 
+@Service
 @RequiredArgsConstructor
 @Slf4j
 public class EmailDispatchService implements DispatchEmailsUseCase {
@@ -31,13 +35,15 @@ public class EmailDispatchService implements DispatchEmailsUseCase {
 
     private final RetryPolicy retryPolicy;
 
-    private final Duration lease;
+    private final EmailMetrics metrics;
+
+    private final YamshchikProperties properties;
 
     private final Clock clock;
 
     @Override
     public boolean dispatchNext() {
-        Optional<Email> claimed = dispatchQueue.claimNext(clock.instant(), lease);
+        Optional<Email> claimed = dispatchQueue.claimNext(clock.instant(), properties.getDispatch().getLease());
         if (claimed.isEmpty()) {
             return false;
         }
@@ -58,10 +64,14 @@ public class EmailDispatchService implements DispatchEmailsUseCase {
 
     private EmailState attempt(Email email) {
         EmailState sending = email.state();
+        Instant started = clock.instant();
         try {
             emailTransport.send(email);
+            Instant now = clock.instant();
+            EmailState sent = sending.sent(now);
+            metrics.attemptCompleted(sent, null, Duration.between(started, now));
             log.info("Email {} sent, attempt {}", email.id(), sending.attempts());
-            return sending.sent(clock.instant());
+            return sent;
         } catch (EmailTransportException e) {
             DeliveryFailure failure = e.getFailure();
             Instant now = clock.instant();
@@ -69,9 +79,11 @@ public class EmailDispatchService implements DispatchEmailsUseCase {
             log.warn("Email {} failed, attempt {}, reply code {}, status {}, next attempt at {}",
                      email.id(), sending.attempts(), failure.replyCode(), failure.enhancedStatus(),
                      nextAttemptAt.orElse(null), e);
-            return nextAttemptAt
+            EmailState result = nextAttemptAt
                     .map(at -> sending.deferred(failure.message(), now, at))
                     .orElseGet(() -> sending.failed(failure.message(), now));
+            metrics.attemptCompleted(result, failure, Duration.between(started, now));
+            return result;
         }
     }
 }

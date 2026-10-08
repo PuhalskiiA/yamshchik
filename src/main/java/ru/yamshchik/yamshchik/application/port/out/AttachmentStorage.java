@@ -12,9 +12,12 @@ import java.io.InputStream;
 public interface AttachmentStorage {
 
     /**
-     * Сохраняет содержимое под ключом вложения. Сохранённое сверяется с его размером и контрольной суммой.
+     * Сохраняет содержимое вложения.
+     *
+     * @return ключ, под которым содержимое сохранено: предложенный в {@code attachment} или свой,
+     *         если хранилище само назначает место
      */
-    void store(Attachment attachment, AttachmentContent content);
+    String store(Attachment attachment, AttachmentContent content);
 
     /**
      * @return поток содержимого; закрывает его вызывающий

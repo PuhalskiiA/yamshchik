@@ -1,0 +1,27 @@
+# Локальный стенд из compose.yaml: все службы на localhost
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/yamshchik
+    username: yamshchik
+    password: yamshchik
+  mail:
+    host: localhost
+    port: 1025
+
+yamshchik:
+  storage:
+    s3:
+      endpoint: http://localhost:9000
+      region: us-east-1
+      bucket: yamshchik
+      access-key: yamshchik
+      secret-key: yamshchik-secret
+      # MinIO адресует бакет по пути, а не по поддомену
+      path-style-access: true
+    filesystem:
+      root: ${java.io.tmpdir}/yamshchik-attachments
+    kafka:
+      bootstrap-servers: localhost:9092
+      topic: yamshchik-attachments
+      # Не больше message.max.bytes брокера из compose.yaml
+      max-record-size: 30MB

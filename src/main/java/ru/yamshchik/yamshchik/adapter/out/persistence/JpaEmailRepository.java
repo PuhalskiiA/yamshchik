@@ -38,6 +38,11 @@ public class JpaEmailRepository implements EmailRepository {
     }
 
     @Override
+    public long countByStatus(EmailStatus status) {
+        return entityRepository.countByStatus(status);
+    }
+
+    @Override
     @Transactional
     public void updateState(EmailState state) {
         entityRepository.updateState(state.id().value(),

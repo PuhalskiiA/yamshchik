@@ -1,7 +1,12 @@
 package ru.yamshchik.yamshchik.adapter.out.persistence;
 
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
+import org.mapstruct.AfterMapping;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.MappingConstants;
+import org.mapstruct.MappingTarget;
+import org.mapstruct.ReportingPolicy;
+import org.springframework.beans.factory.annotation.Autowired;
 import ru.yamshchik.yamshchik.adapter.out.persistence.EmailEntityRepository.EmailStateView;
 import ru.yamshchik.yamshchik.domain.Attachment;
 import ru.yamshchik.yamshchik.domain.Email;
@@ -11,91 +16,79 @@ import ru.yamshchik.yamshchik.domain.EmailState;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import java.util.UUID;
 
 
-@Component
-@RequiredArgsConstructor
-class EmailEntityMapper {
+@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
+abstract class EmailEntityMapper {
 
-    private final JsonMapper jsonMapper;
+    // Сгенерированный наследник создаётся конструктором без параметров, поэтому зависимость внедряется в поле
+    @Autowired
+    protected JsonMapper jsonMapper;
 
-    EmailEntity toEntity(Email email) {
-        EmailEntity entity = new EmailEntity();
-        entity.setId(email.state().id().value());
-        entity.setCreatedAt(email.state().createdAt());
-        applyState(entity, email.state());
-        entity.setMessage(jsonMapper.writeValueAsString(email.message()));
-
-        List<Attachment> attachments = email.attachments();
-        for (int position = 0; position < attachments.size(); position++) {
-            entity.getAttachments().add(toAttachmentEntity(entity, position, attachments.get(position)));
-        }
-        return entity;
-    }
+    @Mapping(target = "id", source = "state.id")
+    @Mapping(target = "status", source = "state.status")
+    @Mapping(target = "attempts", source = "state.attempts")
+    @Mapping(target = "lastError", source = "state.lastError")
+    @Mapping(target = "createdAt", source = "state.createdAt")
+    @Mapping(target = "updatedAt", source = "state.updatedAt")
+    @Mapping(target = "sentAt", source = "state.sentAt")
+    @Mapping(target = "availableAt", source = "state.availableAt")
+    abstract EmailEntity toEntity(Email email);
 
     /**
      * Читает вложения, поэтому вызывается только внутри транзакции.
      */
-    Email toEmail(EmailEntity entity) {
-        return new Email(toState(entity),
-                         jsonMapper.readValue(entity.getMessage(), EmailMessage.class),
-                         toAttachments(entity.getAttachments()));
+    @Mapping(target = "state", source = ".")
+    abstract Email toEmail(EmailEntity entity);
+
+    // sent(...) и withStorageKey(...) возвращают свой же тип, и MapStruct принимает их за свойства для записи
+    @Mapping(target = "sent", ignore = true)
+    abstract EmailState toState(EmailEntity entity);
+
+    @Mapping(target = "sent", ignore = true)
+    abstract EmailState toState(EmailStateView view);
+
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "createdAt", ignore = true)
+    @Mapping(target = "message", ignore = true)
+    @Mapping(target = "attachments", ignore = true)
+    abstract void applyState(@MappingTarget EmailEntity entity, EmailState state);
+
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "email", ignore = true)
+    @Mapping(target = "position", ignore = true)
+    @Mapping(target = "sizeBytes", source = "size")
+    abstract EmailAttachmentEntity toAttachmentEntity(Attachment attachment);
+
+    @Mapping(target = "size", source = "sizeBytes")
+    @Mapping(target = "withStorageKey", ignore = true)
+    abstract Attachment toAttachment(EmailAttachmentEntity entity);
+
+    // Вложение хранит ссылку на письмо и своё место в нём — ни того, ни другого в доменном вложении нет
+    // Параметр email ограничивает вызов сборкой новой записи: при обновлении состояния вложения не трогаются
+    @AfterMapping
+    void linkAttachments(Email email, @MappingTarget EmailEntity entity) {
+        List<EmailAttachmentEntity> attachments = entity.getAttachments();
+        for (int position = 0; position < attachments.size(); position++) {
+            attachments.get(position).setEmail(entity);
+            attachments.get(position).setPosition(position);
+        }
     }
 
-    EmailState toState(EmailEntity entity) {
-        return new EmailState(new EmailId(entity.getId()),
-                              entity.getStatus(),
-                              entity.getAttempts(),
-                              entity.getLastError(),
-                              entity.getCreatedAt(),
-                              entity.getUpdatedAt(),
-                              entity.getSentAt(),
-                              entity.getAvailableAt());
+    EmailId toEmailId(UUID id) {
+        return new EmailId(id);
     }
 
-    EmailState toState(EmailStateView view) {
-        return new EmailState(new EmailId(view.getId()),
-                              view.getStatus(),
-                              view.getAttempts(),
-                              view.getLastError(),
-                              view.getCreatedAt(),
-                              view.getUpdatedAt(),
-                              view.getSentAt(),
-                              view.getAvailableAt());
+    UUID toUuid(EmailId id) {
+        return id.value();
     }
 
-    void applyState(EmailEntity entity, EmailState state) {
-        entity.setStatus(state.status());
-        entity.setAttempts(state.attempts());
-        entity.setLastError(state.lastError());
-        entity.setUpdatedAt(state.updatedAt());
-        entity.setSentAt(state.sentAt());
-        entity.setAvailableAt(state.availableAt());
+    String toJson(EmailMessage message) {
+        return jsonMapper.writeValueAsString(message);
     }
 
-    private static EmailAttachmentEntity toAttachmentEntity(EmailEntity email, int position, Attachment attachment) {
-        EmailAttachmentEntity entity = new EmailAttachmentEntity();
-        entity.setEmail(email);
-        entity.setPosition(position);
-        entity.setFilename(attachment.filename());
-        entity.setMediaType(attachment.mediaType());
-        entity.setDisposition(attachment.disposition());
-        entity.setContentId(attachment.contentId());
-        entity.setStorageKey(attachment.storageKey());
-        entity.setSizeBytes(attachment.size());
-        entity.setSha256(attachment.sha256());
-        return entity;
-    }
-
-    private static List<Attachment> toAttachments(List<EmailAttachmentEntity> entities) {
-        return entities.stream()
-                .map(entity -> new Attachment(entity.getFilename(),
-                                              entity.getMediaType(),
-                                              entity.getDisposition(),
-                                              entity.getContentId(),
-                                              entity.getStorageKey(),
-                                              entity.getSizeBytes(),
-                                              entity.getSha256()))
-                .toList();
+    EmailMessage toMessage(String json) {
+        return jsonMapper.readValue(json, EmailMessage.class);
     }
 }

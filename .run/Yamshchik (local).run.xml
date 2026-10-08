@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Yamshchik (local)" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="ru.yamshchik.yamshchik.YamshchikApplication" />
+    <module name="yamshchik" />
+    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=local" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
