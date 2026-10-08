@@ -1,0 +1,120 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0001-create-email
+      author: yamshchik
+      changes:
+        - createTable:
+            tableName: email
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_email
+              - column:
+                  name: status
+                  type: varchar(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: attempts
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_error
+                  type: text
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sent_at
+                  type: timestamptz
+              - column:
+                  name: available_at
+                  type: timestamptz
+              - column:
+                  name: message
+                  type: jsonb
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: email
+            indexName: ix_email_available_at
+            columns:
+              - column:
+                  name: available_at
+  - changeSet:
+      id: 0002-create-email-attachment
+      author: yamshchik
+      changes:
+        - createTable:
+            tableName: email_attachment
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_email_attachment
+              - column:
+                  name: email_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_email_attachment_email
+                    references: email(id)
+                    deleteCascade: true
+              - column:
+                  name: position
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: filename
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: media_type
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: disposition
+                  type: varchar(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: content_id
+                  type: varchar(255)
+              - column:
+                  name: storage_key
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: size_bytes
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sha256
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: email_attachment
+            indexName: ix_email_attachment_email_id
+            columns:
+              - column:
+                  name: email_id

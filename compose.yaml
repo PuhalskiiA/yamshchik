@@ -1,0 +1,51 @@
+# Окружение для локального запуска: БД, хранилище вложений MinIO (консоль на http://localhost:9001)
+# и почтовый сервер-ловушка (веб-интерфейс на http://localhost:8025)
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: yamshchik
+      POSTGRES_USER: yamshchik
+      POSTGRES_PASSWORD: yamshchik
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yamshchik -d yamshchik"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  minio:
+    # Образы minio/minio с Docker Hub удалены; это сборка того же сервера от Chainguard.
+    # Бесплатно у неё есть только тег latest, поэтому версия закреплена дайджестом (RELEASE.2026-09-22)
+    image: cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
+    # Каталог верхнего уровня в /data — это бакет: создаём его до старта сервера
+    entrypoint: ["sh", "-c", "mkdir -p /data/yamshchik && exec minio server /data --console-address :9001"]
+    environment:
+      MINIO_ROOT_USER: yamshchik
+      MINIO_ROOT_PASSWORD: yamshchik-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  mailpit:
+    image: axllent/mailpit:v1.27
+    environment:
+      # Без этого Mailpit на каждое соединение делает обратный DNS-запрос и держит приветствие ~8 секунд
+      MP_SMTP_DISABLE_RDNS: "true"
+      # Разрешает задавать отказы SMTP через PUT /api/v1/chaos; пока они не заданы, сервер принимает всё
+      MP_ENABLE_CHAOS: "true"
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  postgres-data:
+  minio-data:

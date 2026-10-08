@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: yamshchik
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/yamshchik}
+    username: ${DB_USERNAME:yamshchik}
+    password: ${DB_PASSWORD:yamshchik}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  liquibase:
+    change-log: classpath:/db/changelog/db.changelog-master.yaml
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    default-encoding: UTF-8
+    properties:
+      mail.mime.allowutf8: true
+      # Просим сервер, если он поддерживает DSN, сообщать об отказе и задержке доставки; в отчёт — только заголовки письма
+      mail.smtp.dsn.notify: FAILURE,DELAY
+      mail.smtp.dsn.ret: HDRS
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+  jackson:
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 30MB
+
+yamshchik:
+  dispatch:
+    queue: ${DISPATCH_QUEUE:postgres}
+    poll-interval: PT1S
+    lease: PT5M
+    retry:
+      policy: ${RETRY_POLICY:exponential}
+      max-attempts: ${RETRY_MAX_ATTEMPTS:5}
+      initial-delay: ${RETRY_INITIAL_DELAY:PT30S}
+      max-delay: ${RETRY_MAX_DELAY:PT1H}
+  intake:
+    max-message-size: 25MB
+    max-recipients: 100
+    max-attachments: 10
+    allowed-sender-domains: ${ALLOWED_SENDER_DOMAINS:}
+  storage:
+    endpoint: ${S3_ENDPOINT:http://localhost:9000}
+    region: ${S3_REGION:us-east-1}
+    bucket: ${S3_BUCKET:yamshchik}
+    access-key: ${S3_ACCESS_KEY:yamshchik}
+    secret-key: ${S3_SECRET_KEY:yamshchik-secret}
+    path-style-access: true

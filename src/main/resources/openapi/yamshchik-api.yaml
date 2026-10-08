@@ -1,0 +1,266 @@
+openapi: 3.0.3
+info:
+  title: Yamshchik API
+  version: 0.1.0
+  description: >-
+    API сервиса технологических email-рассылок.
+    Письмо принимается на отправку асинхронно: ответ `202` означает, что письмо сохранено
+    и поставлено в очередь. Результат отправки доступен по идентификатору письма.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: emails
+    description: Создание и отправка писем
+paths:
+  /api/v1/emails:
+    post:
+      tags:
+        - emails
+      operationId: submitEmail
+      summary: Принять письмо на отправку
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  $ref: '#/components/schemas/EmailRequest'
+                attachments:
+                  description: Файлы вложений. Параметры вложения задаются в `email.attachmentOptions` по имени файла.
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: string
+                    format: binary
+            encoding:
+              email:
+                contentType: application/json
+      responses:
+        '202':
+          description: Письмо принято и поставлено в очередь
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/ContentTooLarge'
+  /api/v1/emails/{emailId}:
+    get:
+      tags:
+        - emails
+      operationId: getEmail
+      summary: Получить состояние письма
+      parameters:
+        - name: emailId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Состояние письма
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailState'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ContentTooLarge:
+      description: Запрос или письмо после кодирования превышает допустимый размер
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Письмо не найдено
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    EmailRequest:
+      type: object
+      description: >-
+        Письмо. Должен быть указан хотя бы один получатель (`to`, `cc` или `bcc`)
+        и хотя бы что-то из содержимого: `body.text`, `body.html` или вложение.
+      required:
+        - from
+        - subject
+      properties:
+        from:
+          $ref: '#/components/schemas/Mailbox'
+        replyTo:
+          $ref: '#/components/schemas/Mailbox'
+        to:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/Mailbox'
+        cc:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/Mailbox'
+        bcc:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/Mailbox'
+        subject:
+          type: string
+          maxLength: 998
+          example: Отчёт готов
+        body:
+          $ref: '#/components/schemas/Body'
+        priority:
+          $ref: '#/components/schemas/Priority'
+        headers:
+          description: >-
+            Дополнительные заголовки письма. Допустимы только имена с префиксом `X-`,
+            префикс `X-Yamshchik-` зарезервирован сервисом.
+          type: object
+          maxProperties: 50
+          additionalProperties:
+            type: string
+            maxLength: 998
+          example:
+            X-Campaign: weekly-report
+        attachmentOptions:
+          description: Параметры вложений. Файл без записи здесь отправляется обычным вложением.
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/AttachmentOptions'
+    Mailbox:
+      type: object
+      required:
+        - address
+      properties:
+        address:
+          type: string
+          format: email
+          maxLength: 254
+          example: user@example.com
+        name:
+          description: Отображаемое имя
+          type: string
+          maxLength: 255
+          example: Иван Иванов
+    Body:
+      type: object
+      description: Тело письма. Если заданы оба варианта, клиент получателя выбирает сам (multipart/alternative).
+      properties:
+        text:
+          description: Текстовый вариант (text/plain)
+          type: string
+        html:
+          description: HTML-вариант (text/html)
+          type: string
+    Priority:
+      type: string
+      default: NORMAL
+      enum:
+        - LOW
+        - NORMAL
+        - HIGH
+    AttachmentOptions:
+      type: object
+      required:
+        - filename
+      properties:
+        filename:
+          description: Имя загруженного файла, к которому относятся параметры
+          type: string
+          maxLength: 255
+          example: logo.png
+        disposition:
+          $ref: '#/components/schemas/AttachmentDisposition'
+        contentId:
+          description: Идентификатор для ссылки из HTML (`<img src="cid:...">`). Обязателен для `INLINE`.
+          type: string
+          maxLength: 255
+          example: logo
+    AttachmentDisposition:
+      type: string
+      default: ATTACHMENT
+      enum:
+        - ATTACHMENT
+        - INLINE
+    EmailState:
+      type: object
+      required:
+        - id
+        - status
+        - attempts
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/EmailStatus'
+        attempts:
+          description: Сколько раз письмо бралось в отправку
+          type: integer
+          format: int32
+        lastError:
+          description: Причина последней неудачной отправки
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: string
+          format: date-time
+        nextAttemptAt:
+          description: Когда будет следующая попытка. Задано только в статусе `DEFERRED`.
+          type: string
+          format: date-time
+    EmailStatus:
+      type: string
+      description: >-
+        `ACCEPTED` — принято и ждёт отправки; `SENDING` — передаётся почтовому серверу;
+        `DEFERRED` — попытка не удалась, письмо ждёт следующей;
+        `SENT` — почтовый сервер принял письмо; `FAILED` — отправить не удалось, попыток больше не будет.
+      enum:
+        - ACCEPTED
+        - SENDING
+        - DEFERRED
+        - SENT
+        - FAILED
+    Problem:
+      type: object
+      description: Описание ошибки по RFC 9457
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
