@@ -113,6 +113,30 @@ curl http://localhost:8080/api/v1/emails/{id}
 | `yamshchik_emails_delivery_time_seconds` | Время от приёма письма до приёма его почтовым сервером |
 | `yamshchik_emails_by_status` | Сколько писем в каждом статусе; метка `status` |
 
+## Сборка и раскатка
+
+GitHub Actions, `.github/workflows/ci-cd.yml`. На каждый push в любую ветку — сборка и тесты (`mvnw verify`).
+
+Образ собирается вручную с выбранной ветки: Actions → CI/CD → Run workflow, ветка — в списке «Use workflow from»,
+стенд — в поле «Куда раскатить собранный образ» (`none` — только собрать и опубликовать). Образ публикуется
+в Docker Hub как `<учётная запись>/yamshchik` с тегами `<ветка>` (косая черта в имени заменяется дефисом)
+и `sha-<коммит>`. Раскатка — отдельная задача, она берёт уже опубликованный образ по дайджесту.
+
+Кнопка Run workflow появляется, когда файл пайплайна есть в ветке по умолчанию; запускается та его версия,
+что лежит в выбранной ветке.
+
+Для публикации в настройках репозитория (Settings → Secrets and variables → Actions) нужны переменная
+`DOCKERHUB_USERNAME` и секрет `DOCKERHUB_TOKEN` (токен доступа Docker Hub с правом записи).
+
+Стенды `develop` и `production` — окружения GitHub (Settings → Environments), у каждого свои настройки:
+
+| Имя | Вид | Назначение |
+|---|---|---|
+| `DEPLOY_HOST`, `DEPLOY_USER` | переменные | Сервер стенда и пользователь для входа по SSH |
+| `DEPLOY_PATH` | переменная | Каталог на сервере с файлом compose, где сервис `app` берёт образ из `YAMSHCHIK_IMAGE` |
+| `DEPLOY_KNOWN_HOSTS` | переменная | Строка `known_hosts` сервера (`ssh-keyscan <сервер>`) |
+| `DEPLOY_SSH_KEY` | секрет | Закрытый ключ для входа |
+
 ## API
 
 Контракт описан в `src/main/resources/openapi/yamshchik-api.yaml` и является источником истины:
