@@ -1,0 +1,14 @@
+{
+  "to": [{"address": "user@example.org", "name": "Иван Иванов"}],
+  "subject": "Письмо с картинкой",
+  "body": {
+    "text": "Картинка во вложении.",
+    "html": "<h1>Привет!</h1><p>Вот картинка:</p><img src=\"cid:photo\">"
+  },
+  "attachmentOptions": [{
+    "filename": "img.png",
+    "sha256": "9251288c2e2d53cd23cbda13180d05d6f4cbc2c4354ab56d6958a3a616ff5f0f",
+    "disposition": "INLINE",
+    "contentId": "photo"
+  }]
+}

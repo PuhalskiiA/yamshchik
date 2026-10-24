@@ -48,6 +48,8 @@ public class MimeMessageAssembler {
 
     public static final String EMAIL_ID_HEADER = "X-Yamshchik-Email-Id";
 
+    public static final String ATTEMPT_HEADER = "X-Yamshchik-Attempt";
+
     private static final String CHARSET = StandardCharsets.UTF_8.name();
 
     private static final String SUBTYPE_MIXED = "mixed";
@@ -93,8 +95,10 @@ public class MimeMessageAssembler {
         for (Map.Entry<String, String> header : message.headers().entrySet()) {
             target.setHeader(header.getKey(), MimeUtility.encodeText(header.getValue(), CHARSET, null));
         }
-        // По этому заголовку отчёт о доставке сопоставляется с исходным письмом
+        // По этим заголовкам отчёт о доставке сопоставляется с исходным письмом
         target.setHeader(EMAIL_ID_HEADER, email.id().toString());
+        // По номеру попытки отбрасываются отчёты о прошлых попытках, пришедшие после повторной отправки
+        target.setHeader(ATTEMPT_HEADER, Integer.toString(email.state().attempts()));
         if (message.priority() != Priority.NORMAL) {
             target.setHeader(PRIORITY_HEADER, PRIORITY_VALUES.get(message.priority()));
             target.setHeader(IMPORTANCE_HEADER, IMPORTANCE_VALUES.get(message.priority()));

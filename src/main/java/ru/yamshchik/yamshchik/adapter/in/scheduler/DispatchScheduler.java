@@ -5,9 +5,11 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import ru.yamshchik.yamshchik.application.port.in.DispatchEmailsUseCase;
+import ru.yamshchik.yamshchik.application.port.in.DispatchEmailsUseCase.DispatchResult;
 import ru.yamshchik.yamshchik.config.ScheduleConfig;
 import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -23,11 +25,16 @@ import java.util.concurrent.Future;
 @Slf4j
 public class DispatchScheduler {
 
+    // Запас на округление: разрешение должно успеть накопиться к пробуждению
+    private static final Duration MIN_WAIT = Duration.ofMillis(1);
+
     private final DispatchEmailsUseCase dispatchEmailsUseCase;
 
     private final ExecutorService executor;
 
     private final int workers;
+
+    private final Duration pollInterval;
 
     public DispatchScheduler(
             DispatchEmailsUseCase dispatchEmailsUseCase,
@@ -37,6 +44,7 @@ public class DispatchScheduler {
         this.dispatchEmailsUseCase = dispatchEmailsUseCase;
         this.executor = executor;
         this.workers = properties.getDispatch().getWorkers();
+        this.pollInterval = properties.getDispatch().getPollInterval();
     }
 
     @Scheduled(fixedDelayString = "${yamshchik.dispatch.poll-interval}")
@@ -52,11 +60,18 @@ public class DispatchScheduler {
         }
     }
 
-    private Void drain() {
-        boolean dispatched;
-        do {
-            dispatched = dispatchEmailsUseCase.dispatchNext();
-        } while (dispatched);
-        return null;
+    // Если письмо не ушло только из-за темпа и разрешение появится раньше следующего опроса, обработчик ждёт его
+    private Void drain() throws InterruptedException {
+        while (true) {
+            DispatchResult result = dispatchEmailsUseCase.dispatchNext();
+            if (result.dispatched()) {
+                continue;
+            }
+            Duration wait = result.rateLimitedFor();
+            if (wait == null || wait.compareTo(pollInterval) >= 0) {
+                return null;
+            }
+            Thread.sleep(wait.plus(MIN_WAIT));
+        }
     }
 }

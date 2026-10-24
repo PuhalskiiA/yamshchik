@@ -7,19 +7,25 @@ import org.mapstruct.MappingConstants;
 import org.mapstruct.MappingTarget;
 import org.mapstruct.ReportingPolicy;
 import org.springframework.beans.factory.annotation.Autowired;
+import ru.yamshchik.yamshchik.adapter.out.persistence.EmailAttachmentEntityRepository.StoredAttachmentView;
 import ru.yamshchik.yamshchik.adapter.out.persistence.EmailEntityRepository.EmailStateView;
 import ru.yamshchik.yamshchik.domain.Attachment;
+import ru.yamshchik.yamshchik.domain.Delivery;
+import ru.yamshchik.yamshchik.domain.DeliveryEvent;
 import ru.yamshchik.yamshchik.domain.Email;
 import ru.yamshchik.yamshchik.domain.EmailId;
 import ru.yamshchik.yamshchik.domain.EmailMessage;
 import ru.yamshchik.yamshchik.domain.EmailState;
+import ru.yamshchik.yamshchik.domain.StoredAttachment;
+import ru.yamshchik.yamshchik.domain.TrafficClass;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 import java.util.UUID;
 
 
-@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
+@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR,
+        imports = TrafficClass.class)
 abstract class EmailEntityMapper {
 
     // Сгенерированный наследник создаётся конструктором без параметров, поэтому зависимость внедряется в поле
@@ -34,6 +40,7 @@ abstract class EmailEntityMapper {
     @Mapping(target = "updatedAt", source = "state.updatedAt")
     @Mapping(target = "sentAt", source = "state.sentAt")
     @Mapping(target = "availableAt", source = "state.availableAt")
+    @Mapping(target = "trafficClass", expression = "java(TrafficClass.of(email.message().priority()))")
     abstract EmailEntity toEntity(Email email);
 
     /**
@@ -53,17 +60,39 @@ abstract class EmailEntityMapper {
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "message", ignore = true)
     @Mapping(target = "attachments", ignore = true)
+    @Mapping(target = "trafficClass", ignore = true)
     abstract void applyState(@MappingTarget EmailEntity entity, EmailState state);
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "email", ignore = true)
     @Mapping(target = "position", ignore = true)
     @Mapping(target = "sizeBytes", source = "size")
+    @Mapping(target = "deletedAt", ignore = true)
     abstract EmailAttachmentEntity toAttachmentEntity(Attachment attachment);
 
     @Mapping(target = "size", source = "sizeBytes")
     @Mapping(target = "withStorageKey", ignore = true)
     abstract Attachment toAttachment(EmailAttachmentEntity entity);
+
+    @Mapping(target = "attachment", source = ".")
+    abstract StoredAttachment toStored(StoredAttachmentView view);
+
+    @Mapping(target = "size", source = "sizeBytes")
+    @Mapping(target = "withStorageKey", ignore = true)
+    abstract Attachment toAttachment(StoredAttachmentView view);
+
+    @Mapping(target = "id", ignore = true)
+    abstract DeliveryEntity toDeliveryEntity(Delivery delivery);
+
+    // incident(...) возвращает свой же тип, и MapStruct принимает его за свойство для записи
+    @Mapping(target = "incident", ignore = true)
+    abstract Delivery toDelivery(DeliveryEntity entity);
+
+    @Mapping(target = "claimedUntil", ignore = true)
+    @Mapping(target = "publishedAt", ignore = true)
+    abstract DeliveryEventEntity toEventEntity(DeliveryEvent event);
+
+    abstract DeliveryEvent toEvent(DeliveryEventEntity entity);
 
     // Вложение хранит ссылку на письмо и своё место в нём — ни того, ни другого в доменном вложении нет
     // Параметр email ограничивает вызов сборкой новой записи: при обновлении состояния вложения не трогаются

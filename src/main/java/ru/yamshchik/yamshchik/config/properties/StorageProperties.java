@@ -43,6 +43,13 @@ public class StorageProperties {
     @Valid
     private Kafka kafka;
 
+    /**
+     * Уборка хранилища по заполненности.
+     */
+    @NotNull(message = "Обязательно должны быть указаны параметры уборки хранилища вложений!")
+    @Valid
+    private CleanupProperties cleanup;
+
     @AssertTrue(message = "Для выбранного хранилища вложений должны быть заданы его настройки!")
     public boolean isSelectedStorageConfigured() {
         if (type == null) {

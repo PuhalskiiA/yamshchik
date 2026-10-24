@@ -142,17 +142,38 @@ class EmailStateTest {
     }
 
     @Test
-    @DisplayName("Брошенное письмо берётся повторно после истечения аренды")
-    void sendingCanBeReclaimedAfterLease() {
+    @DisplayName("Брошенное письмо и после аренды напрямую в отправку не берётся")
+    void sendingIsNotReclaimedDirectly() {
+        assertThatThrownBy(() -> sending().startSending(NOW.plus(LEASE), LEASE))
+                .overridingErrorMessage("Сервер мог принять письмо в прерванной попытке — сразу повторять нельзя")
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("Прерванная попытка: письмо ждёт отчёта о ней, потом может уйти новой попыткой")
+    void interruptedWaitsForReport() {
         Instant afterLease = NOW.plus(LEASE);
+        Instant waitUntil = afterLease.plus(Duration.ofMinutes(2));
 
-        EmailState reclaimed = sending().startSending(afterLease, Duration.ofMinutes(1));
+        EmailState interrupted = sending().interrupted(afterLease, waitUntil);
 
-        assertThat(reclaimed.status()).isEqualTo(EmailStatus.SENDING);
-        assertThat(reclaimed.attempts())
-                .overridingErrorMessage("Повторный захват брошенного письма должен считаться новой попыткой")
-                .isEqualTo(2);
-        assertThat(reclaimed.availableAt()).isEqualTo(afterLease.plus(Duration.ofMinutes(1)));
+        assertThat(interrupted.status()).isEqualTo(EmailStatus.DEFERRED);
+        assertThat(interrupted.attempts())
+                .overridingErrorMessage("Номер попытки не меняется: отчёт придёт именно о ней")
+                .isEqualTo(1);
+        assertThat(interrupted.availableAt())
+                .overridingErrorMessage("До конца ожидания отчёта письмо отправляться не должно")
+                .isEqualTo(waitUntil);
+        assertThat(interrupted.lastError()).contains("Attempt 1");
+        EmailState resent = interrupted.startSending(waitUntil, LEASE);
+        assertThat(resent.attempts()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("Пока аренда не истекла, попытка прерванной не считается")
+    void notInterruptedWithinLease() {
+        assertThatThrownBy(() -> sending().interrupted(NOW.plus(LEASE).minusMillis(1), NOW.plus(LEASE)))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @ParameterizedTest

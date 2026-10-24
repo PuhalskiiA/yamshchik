@@ -1,13 +1,17 @@
 package ru.yamshchik.yamshchik.adapter.out.smtp;
 
+import jakarta.mail.Address;
 import jakarta.mail.MessagingException;
+import jakarta.mail.Session;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import org.eclipse.angus.mail.smtp.SMTPAddressFailedException;
 import org.eclipse.angus.mail.smtp.SMTPSendFailedException;
 import org.eclipse.angus.mail.smtp.SMTPSenderFailedException;
 import org.springframework.mail.MailSendException;
-import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.stereotype.Component;
 import ru.yamshchik.yamshchik.application.port.out.EmailTransport;
 import ru.yamshchik.yamshchik.config.exception.type.AttachmentStorageException;
@@ -20,6 +24,7 @@ import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,14 +43,16 @@ public class SmtpEmailTransport implements EmailTransport {
     // Расширенный статус по RFC 3463: класс.предмет.деталь, например 4.7.1
     private static final Pattern ENHANCED_STATUS_PATTERN = Pattern.compile("\\b[245]\\.\\d{1,3}\\.\\d{1,3}\\b");
 
-    private final JavaMailSender mailSender;
+    // Нужна сессия почты: письмо с отдельным списком адресатов конверта создаётся в ней напрямую
+    private final JavaMailSenderImpl mailSender;
 
     private final MimeMessageAssembler assembler;
 
     @Override
-    public void send(Email email) {
-        MimeMessage mimeMessage = mailSender.createMimeMessage();
+    public void send(Email email, List<String> recipients) {
+        MimeMessage mimeMessage;
         try {
+            mimeMessage = new EnvelopeMimeMessage(mailSender.getSession(), toAddresses(recipients));
             assembler.assemble(email, mimeMessage);
         } catch (Exception e) {
             // Письмо, которое не собирается, не соберётся и при повторе
@@ -66,6 +73,14 @@ public class SmtpEmailTransport implements EmailTransport {
         } catch (Exception e) {
             throw new ServiceValidationException(ASSEMBLY_ERROR_MESSAGE + e.getMessage());
         }
+    }
+
+    private static Address[] toAddresses(List<String> recipients) throws AddressException {
+        Address[] addresses = new Address[recipients.size()];
+        for (int index = 0; index < recipients.size(); index++) {
+            addresses[index] = new InternetAddress(recipients.get(index), true);
+        }
+        return addresses;
     }
 
     /**
@@ -129,5 +144,25 @@ public class SmtpEmailTransport implements EmailTransport {
         }
         Matcher matcher = ENHANCED_STATUS_PATTERN.matcher(error.getMessage());
         return matcher.find() ? matcher.group() : null;
+    }
+
+    /**
+     * Письмо, которое сервер доставляет только указанным адресатам. Отправка берёт адресатов конверта
+     * из {@link MimeMessage#getAllRecipients()}, а заголовки письма пишутся как есть, поэтому в них
+     * остаются все получатели, даже когда письмо повторно уходит части из них.
+     */
+    private static final class EnvelopeMimeMessage extends MimeMessage {
+
+        private final Address[] envelope;
+
+        private EnvelopeMimeMessage(Session session, Address[] envelope) {
+            super(session);
+            this.envelope = envelope;
+        }
+
+        @Override
+        public Address[] getAllRecipients() {
+            return envelope.clone();
+        }
     }
 }

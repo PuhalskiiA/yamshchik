@@ -1,0 +1,41 @@
+compatibility_level = 3.6
+myhostname = mail.yamshchik.test
+mydomain = yamshchik.test
+myorigin = $mydomain
+mydestination =
+alias_maps =
+inet_interfaces = all
+inet_protocols = ipv4
+mynetworks = 127.0.0.0/8
+maillog_file = /dev/stdout
+# Не меньше лимита письма в сервисе (25 МБ после кодирования); по умолчанию 10 МБ
+message_size_limit = 31457280
+# Без этого на каждое подключение идёт обратный DNS-запрос по адресу клиента и приём письма ждёт его таймаут
+smtpd_peername_lookup = no
+# Имена соседних контейнеров знает только встроенный DNS Docker
+smtp_host_lookup = native
+
+# Чужие домены уходят в приёмник стенда. Он отчётов о доставке не поддерживает,
+# поэтому на такие письма сервер отвечает отчётом «передано дальше»
+relayhost = [mailpit]:1025
+
+# Свой домен: ящики учётной записи сервиса и местного получателя
+virtual_mailbox_domains = yamshchik.test
+virtual_mailbox_base = /var/mail/vhosts
+virtual_mailbox_maps = texthash:/etc/postfix/vmailbox
+virtual_uid_maps = static:5000
+virtual_gid_maps = static:5000
+
+# Отправлять на чужие домены может только вошедший под учётной записью; её проверяет Dovecot
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_relay_restrictions = permit_sasl_authenticated, reject_unauth_destination
+
+# Сроки очереди сжаты до минут, чтобы отчёты о задержке и об отказе после повторов можно было дождаться на стенде
+queue_run_delay = 20s
+minimal_backoff_time = 20s
+maximal_backoff_time = 40s
+delay_warning_time = 1m
+maximal_queue_lifetime = 3m
+bounce_queue_lifetime = 3m

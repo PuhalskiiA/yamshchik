@@ -16,6 +16,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import ru.yamshchik.yamshchik.domain.AttachmentDisposition;
 
+import java.time.Instant;
+
 
 @Entity
 @Table(name = "email_attachment")
@@ -55,4 +57,7 @@ public class EmailAttachmentEntity {
 
     @Column(nullable = false)
     private String sha256;
+
+    // Содержимое удалено уборкой хранилища; запись остаётся, чтобы было видно, что у письма было вложение
+    private Instant deletedAt;
 }

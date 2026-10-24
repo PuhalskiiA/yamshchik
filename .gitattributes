@@ -1,2 +1,4 @@
 /mvnw text eol=lf
 *.cmd text eol=crlf
+# Файлы стенда читаются внутри контейнеров Linux
+/stand/** text eol=lf

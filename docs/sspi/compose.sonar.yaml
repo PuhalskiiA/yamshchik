@@ -1,0 +1,19 @@
+# SonarQube для курсовой СППИ: docker compose -f docs/sspi/compose.sonar.yaml up -d --wait
+# Веб-интерфейс на http://localhost:9002 (порты 9000 и 9001 заняты MinIO), первый вход — admin / admin
+services:
+  sonarqube:
+    image: sonarqube:26.10.0.133078-community
+    ports:
+      - "9002:9000"
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+volumes:
+  sonarqube-data:
+  sonarqube-extensions:

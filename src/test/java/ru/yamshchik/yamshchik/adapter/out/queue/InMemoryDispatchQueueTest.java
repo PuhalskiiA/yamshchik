@@ -11,6 +11,7 @@ import ru.yamshchik.yamshchik.application.port.out.EmailRepository;
 import ru.yamshchik.yamshchik.domain.Email;
 import ru.yamshchik.yamshchik.domain.EmailId;
 import ru.yamshchik.yamshchik.domain.EmailStatus;
+import ru.yamshchik.yamshchik.domain.TrafficClass;
 
 import java.util.Optional;
 
@@ -39,7 +40,7 @@ class InMemoryDispatchQueueTest {
     @Test
     @DisplayName("Пустая очередь ничего не отдаёт")
     void emptyQueue() {
-        assertThat(queue.claimNext(NOW, LEASE)).isEmpty();
+        assertThat(queue.claimNext(TrafficClass.BULK, NOW, LEASE)).isEmpty();
         verifyNoInteractions(emailRepository);
     }
 
@@ -47,9 +48,9 @@ class InMemoryDispatchQueueTest {
     @DisplayName("Захват переводит письмо в отправку и записывает это в хранилище")
     void claimStartsSending() {
         Email email = stored(TestData.acceptedEmail());
-        queue.enqueue(email.id(), NOW);
+        queue.enqueue(email.id(), TrafficClass.BULK, NOW);
 
-        Email claimed = queue.claimNext(NOW, LEASE).orElseThrow();
+        Email claimed = queue.claimNext(TrafficClass.BULK, NOW, LEASE).orElseThrow();
 
         assertThat(claimed.state().status())
                 .overridingErrorMessage("Захваченное письмо должно быть в статусе SENDING, а не %s",
@@ -63,11 +64,11 @@ class InMemoryDispatchQueueTest {
     @DisplayName("Одно письмо не отдаётся дважды")
     void emailIsClaimedOnce() {
         Email email = stored(TestData.acceptedEmail());
-        queue.enqueue(email.id(), NOW);
+        queue.enqueue(email.id(), TrafficClass.BULK, NOW);
 
-        queue.claimNext(NOW, LEASE);
+        queue.claimNext(TrafficClass.BULK, NOW, LEASE);
 
-        assertThat(queue.claimNext(NOW, LEASE))
+        assertThat(queue.claimNext(TrafficClass.BULK, NOW, LEASE))
                 .overridingErrorMessage("После захвата письма в очереди ничего не должно остаться")
                 .isEmpty();
     }
@@ -76,12 +77,12 @@ class InMemoryDispatchQueueTest {
     @DisplayName("Письмо не отдаётся раньше своего времени")
     void notBeforeAvailableAt() {
         Email email = stored(TestData.acceptedEmail());
-        queue.enqueue(email.id(), NOW.plusSeconds(30));
+        queue.enqueue(email.id(), TrafficClass.BULK, NOW.plusSeconds(30));
 
-        assertThat(queue.claimNext(NOW.plusSeconds(29), LEASE))
+        assertThat(queue.claimNext(TrafficClass.BULK, NOW.plusSeconds(29), LEASE))
                 .overridingErrorMessage("Отложенное письмо не должно отдаваться до времени следующей попытки")
                 .isEmpty();
-        assertThat(queue.claimNext(NOW.plusSeconds(30), LEASE)).isPresent();
+        assertThat(queue.claimNext(TrafficClass.BULK, NOW.plusSeconds(30), LEASE)).isPresent();
     }
 
     @Test
@@ -90,13 +91,13 @@ class InMemoryDispatchQueueTest {
         Email late = stored(TestData.acceptedEmail());
         Email first = stored(TestData.acceptedEmail());
         Email second = stored(TestData.acceptedEmail());
-        queue.enqueue(late.id(), NOW.plusSeconds(10));
-        queue.enqueue(first.id(), NOW);
-        queue.enqueue(second.id(), NOW);
+        queue.enqueue(late.id(), TrafficClass.BULK, NOW.plusSeconds(10));
+        queue.enqueue(first.id(), TrafficClass.BULK, NOW);
+        queue.enqueue(second.id(), TrafficClass.BULK, NOW);
 
-        EmailId claimedFirst = queue.claimNext(NOW.plusSeconds(60), LEASE).orElseThrow().id();
-        EmailId claimedSecond = queue.claimNext(NOW.plusSeconds(60), LEASE).orElseThrow().id();
-        EmailId claimedThird = queue.claimNext(NOW.plusSeconds(60), LEASE).orElseThrow().id();
+        EmailId claimedFirst = queue.claimNext(TrafficClass.BULK, NOW.plusSeconds(60), LEASE).orElseThrow().id();
+        EmailId claimedSecond = queue.claimNext(TrafficClass.BULK, NOW.plusSeconds(60), LEASE).orElseThrow().id();
+        EmailId claimedThird = queue.claimNext(TrafficClass.BULK, NOW.plusSeconds(60), LEASE).orElseThrow().id();
 
         assertThat(claimedFirst)
                 .overridingErrorMessage("Первым должно уйти письмо, поставленное раньше при том же времени")
@@ -113,14 +114,26 @@ class InMemoryDispatchQueueTest {
         EmailId missing = EmailId.newId();
         when(emailRepository.find(missing)).thenReturn(Optional.empty());
         Email present = stored(TestData.acceptedEmail());
-        queue.enqueue(missing, NOW);
-        queue.enqueue(present.id(), NOW);
+        queue.enqueue(missing, TrafficClass.BULK, NOW);
+        queue.enqueue(present.id(), TrafficClass.BULK, NOW);
 
-        Optional<Email> claimed = queue.claimNext(NOW, LEASE);
+        Optional<Email> claimed = queue.claimNext(TrafficClass.BULK, NOW, LEASE);
 
         assertThat(claimed).map(Email::id)
                 .overridingErrorMessage("Пропавшее письмо не должно останавливать очередь")
                 .contains(present.id());
+    }
+
+    @Test
+    @DisplayName("У каждого класса трафика своя очередь")
+    void queuePerTrafficClass() {
+        Email bulk = stored(TestData.acceptedEmail());
+        queue.enqueue(bulk.id(), TrafficClass.BULK, NOW);
+
+        assertThat(queue.claimNext(TrafficClass.URGENT, NOW, LEASE))
+                .overridingErrorMessage("Массовое письмо не должно выдаваться за срочное")
+                .isEmpty();
+        assertThat(queue.claimNext(TrafficClass.BULK, NOW, LEASE)).map(Email::id).contains(bulk.id());
     }
 
     private Email stored(Email email) {

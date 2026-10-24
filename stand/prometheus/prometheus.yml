@@ -1,0 +1,14 @@
+# Сбор показателей стенда. Приложение может работать как на хосте (из IDE), так и в контейнере —
+# опрашиваются оба адреса, недоступный просто помечается как down
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: yamshchik
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080", "app:8080"]
+  - job_name: smtp-stub
+    static_configs:
+      - targets: ["smtp-stub:8080"]

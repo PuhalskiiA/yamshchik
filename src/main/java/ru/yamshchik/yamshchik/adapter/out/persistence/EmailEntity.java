@@ -19,6 +19,7 @@ import lombok.Setter;
 import org.hibernate.annotations.ColumnTransformer;
 import org.springframework.data.domain.Persistable;
 import ru.yamshchik.yamshchik.domain.EmailStatus;
+import ru.yamshchik.yamshchik.domain.TrafficClass;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -54,6 +55,10 @@ public class EmailEntity implements Persistable<UUID> {
     private Instant sentAt;
 
     private Instant availableAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private TrafficClass trafficClass;
 
     @Column(nullable = false, columnDefinition = "jsonb")
     @ColumnTransformer(write = "cast(? as jsonb)")

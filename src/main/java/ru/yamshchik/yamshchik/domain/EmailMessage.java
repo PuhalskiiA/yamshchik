@@ -40,6 +40,21 @@ public record EmailMessage(
         headers.forEach(EmailMessage::validateHeader);
     }
 
+    /**
+     * Делит письмо для персональной отправки.
+     *
+     * @return по одному письму на каждого получателя из {@code to}, в том же порядке
+     */
+    public List<EmailMessage> splitByRecipient() {
+        if (!recipients.cc().isEmpty() || !recipients.bcc().isEmpty()) {
+            throw new ServiceValidationException("Personal sending allows recipients only in 'to'");
+        }
+        return recipients.to().stream()
+                .map(recipient -> new EmailMessage(from, replyTo, new Recipients(List.of(recipient), null, null),
+                                                   subject, body, priority, headers))
+                .toList();
+    }
+
     private static void validateHeader(String name, String value) {
         String lowerName = name.toLowerCase(Locale.ROOT);
         if (!HEADER_NAME_PATTERN.matcher(name).matches()

@@ -4,11 +4,24 @@ spring:
     url: jdbc:postgresql://localhost:5432/yamshchik
     username: yamshchik
     password: yamshchik
+  # Свой почтовый сервер стенда: письма отправляются под учётной записью сервиса, отчёты о доставке приходят в её ящик
   mail:
     host: localhost
-    port: 1025
+    port: 2525
+    username: noreply@yamshchik.test
+    password: yamshchik-secret
+    properties:
+      mail.smtp.auth: true
 
 yamshchik:
+  sender:
+    address: noreply@yamshchik.test
+    name: Ямщик
+  reports:
+    host: localhost
+    port: 1143
+  events:
+    bootstrap-servers: localhost:9092
   storage:
     s3:
       endpoint: http://localhost:9000

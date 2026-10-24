@@ -13,14 +13,19 @@ spring:
     default-encoding: UTF-8
     properties:
       mail.mime.allowutf8: true
-      # Просим сервер, если он поддерживает DSN, сообщать об отказе и задержке доставки; в отчёт — только заголовки письма
-      mail.smtp.dsn.notify: FAILURE,DELAY
+      # Просим сервер, если он поддерживает DSN, сообщать о доставке, отказе и задержке; в отчёт — только заголовки письма
+      mail.smtp.dsn.notify: SUCCESS,FAILURE,DELAY
       mail.smtp.dsn.ret: HDRS
       mail.smtp.connectiontimeout: 10000
       mail.smtp.timeout: 10000
       mail.smtp.writetimeout: 10000
   jackson:
     default-property-inclusion: non_null
+  task:
+    scheduling:
+      pool:
+        # Отправка, чтение отчётов, публикация событий и уборка хранилища не должны ждать друг друга
+        size: 4
   servlet:
     multipart:
       max-file-size: 25MB
@@ -38,15 +43,43 @@ yamshchik:
     poll-interval: PT1S
     workers: ${DISPATCH_WORKERS:4}
     lease: PT5M
+    interrupted-wait: ${INTERRUPTED_WAIT:PT2M}
     retry:
       policy: ${RETRY_POLICY:exponential}
       max-attempts: ${RETRY_MAX_ATTEMPTS:5}
       initial-delay: ${RETRY_INITIAL_DELAY:PT30S}
       max-delay: ${RETRY_MAX_DELAY:PT1H}
+    rate-limit:
+      strategy: ${RATE_LIMIT_STRATEGY:none}
+      # Писем в секунду: постоянный темп для fixed, начальный для aimd
+      rate: ${RATE_LIMIT_RATE:10}
+      urgent-share: ${RATE_LIMIT_URGENT_SHARE:0.2}
+      burst: PT1S
+      min-rate: ${RATE_LIMIT_MIN_RATE:0.05}
+      max-rate: ${RATE_LIMIT_MAX_RATE:100}
+      increase: ${RATE_LIMIT_INCREASE:0.5}
+      increase-interval: ${RATE_LIMIT_INCREASE_INTERVAL:PT5S}
+      decrease-factor: ${RATE_LIMIT_DECREASE_FACTOR:0.5}
+      decrease-cooldown: ${RATE_LIMIT_DECREASE_COOLDOWN:PT5S}
   intake:
     max-message-size: 25MB
     max-recipients: 100
     max-attachments: 10
-    allowed-sender-domains: ${ALLOWED_SENDER_DOMAINS:}
   storage:
     type: ${ATTACHMENT_STORAGE:s3}
+    cleanup:
+      capacity: ${ATTACHMENT_STORAGE_CAPACITY:10GB}
+      threshold-percent: 75
+      min-age: P3D
+      interval: PT10M
+      batch-size: 100
+  reports:
+    folder: INBOX
+    poll-interval: PT10S
+    batch-size: 100
+    important-timeout: ${REPORT_IMPORTANT_TIMEOUT:PT30M}
+  events:
+    topic: yamshchik-delivery-events
+    poll-interval: PT1S
+    batch-size: 100
+    lease: PT1M

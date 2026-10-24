@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Сгенерированный код в анализ не входит: интерфейсы и DTO из спеки, наследники MapStruct -->
+<FindBugsFilter>
+    <Match>
+        <Package name="~ru\.yamshchik\.yamshchik\.adapter\.in\.rest\.(api|dto)"/>
+    </Match>
+    <Match>
+        <Class name="~.*MapperImpl"/>
+    </Match>
+</FindBugsFilter>

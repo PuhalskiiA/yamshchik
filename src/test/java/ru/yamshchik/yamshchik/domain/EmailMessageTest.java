@@ -99,6 +99,46 @@ class EmailMessageTest {
                 .containsOnlyKeys("X-Test");
     }
 
+    @Test
+    @DisplayName("Персональная отправка: по письму на получателя, остальное содержимое то же")
+    void splitByRecipient() {
+        Recipients three = new Recipients(
+                List.of(mailbox("a@example.org"), mailbox("b@example.org"), mailbox("c@example.org")), null, null);
+        EmailMessage message = new EmailMessage(FROM, mailbox("reply@example.org"), three, "Тема",
+                                                List.of(BodyAlternative.plainText("текст")), Priority.HIGH,
+                                                Map.of("X-Test", "1"));
+
+        List<EmailMessage> personal = message.splitByRecipient();
+
+        assertThat(personal).extracting(EmailMessage::recipients)
+                .overridingErrorMessage("Каждое письмо должно идти одному получателю, в порядке списка to")
+                .containsExactly(new Recipients(List.of(mailbox("a@example.org")), null, null),
+                                 new Recipients(List.of(mailbox("b@example.org")), null, null),
+                                 new Recipients(List.of(mailbox("c@example.org")), null, null));
+        assertThat(personal)
+                .overridingErrorMessage("Письма должны отличаться только получателем")
+                .allSatisfy(part -> assertThat(part).usingRecursiveComparison()
+                        .ignoringFields("recipients").isEqualTo(message));
+    }
+
+    @Test
+    @DisplayName("Персональная отправка с копией или скрытой копией запрещена")
+    void splitByRecipientRejectsCopies() {
+        List<Mailbox> to = List.of(mailbox("a@example.org"));
+        List<Mailbox> copy = List.of(mailbox("b@example.org"));
+
+        assertThatThrownBy(() -> message(new Recipients(to, copy, null)).splitByRecipient())
+                .overridingErrorMessage("Копия в персональной отправке должна отклоняться")
+                .isInstanceOf(ServiceValidationException.class);
+        assertThatThrownBy(() -> message(new Recipients(to, null, copy)).splitByRecipient())
+                .overridingErrorMessage("Скрытая копия в персональной отправке должна отклоняться")
+                .isInstanceOf(ServiceValidationException.class);
+    }
+
+    private static EmailMessage message(Recipients recipients) {
+        return new EmailMessage(FROM, null, recipients, "Тема", null, null, null);
+    }
+
     private static EmailMessage withHeader(String name, String value) {
         return new EmailMessage(FROM, null, RECIPIENTS, "Тема", null, null, Map.of(name, value));
     }

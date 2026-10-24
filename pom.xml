@@ -224,4 +224,88 @@
         </plugins>
     </build>
 
+    <profiles>
+        <!-- Статический анализ для курсовой СППИ: mvnw -Psspi verify; отчёты в target/reports/spotbugs.html и target/reports/pmd.html.
+             Нарушения сборку не валят: нужны отчёты, а не барьер качества -->
+        <profile>
+            <id>sspi</id>
+            <properties>
+                <spotbugs-maven-plugin.version>4.10.5.0</spotbugs-maven-plugin.version>
+                <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version>
+                <pmd.version>7.28.0</pmd.version>
+                <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
+                <sonar.host.url>http://localhost:9002</sonar.host.url>
+                <!-- Интерфейсы и DTO, сгенерированные из спеки -->
+                <sonar.exclusions>**/adapter/in/rest/api/**,**/adapter/in/rest/dto/**</sonar.exclusions>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs-maven-plugin</artifactId>
+                        <version>${spotbugs-maven-plugin.version}</version>
+                        <configuration>
+                            <effort>Max</effort>
+                            <threshold>Low</threshold>
+                            <htmlOutput>true</htmlOutput>
+                            <failOnError>false</failOnError>
+                            <excludeFilterFile>${project.basedir}/docs/sspi/spotbugs-exclude.xml</excludeFilterFile>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>spotbugs</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-pmd-plugin</artifactId>
+                        <version>${maven-pmd-plugin.version}</version>
+                        <!-- Плагин по умолчанию несёт PMD старее, чем нужно для Java 25 -->
+                        <dependencies>
+                            <dependency>
+                                <groupId>net.sourceforge.pmd</groupId>
+                                <artifactId>pmd-core</artifactId>
+                                <version>${pmd.version}</version>
+                            </dependency>
+                            <dependency>
+                                <groupId>net.sourceforge.pmd</groupId>
+                                <artifactId>pmd-java</artifactId>
+                                <version>${pmd.version}</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <targetJdk>${java.version}</targetJdk>
+                            <!-- Набор по умолчанию слишком узкий и содержит правила, которые PMD снимает с поддержки -->
+                            <rulesets>
+                                <ruleset>/rulesets/java/quickstart.xml</ruleset>
+                            </rulesets>
+                            <linkXRef>false</linkXRef>
+                            <failOnViolation>false</failOnViolation>
+                            <excludeRoots>
+                                <excludeRoot>${project.build.directory}/generated-sources</excludeRoot>
+                            </excludeRoots>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>pmd</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonarsource.scanner.maven</groupId>
+                        <artifactId>sonar-maven-plugin</artifactId>
+                        <version>${sonar-maven-plugin.version}</version>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
 </project>
