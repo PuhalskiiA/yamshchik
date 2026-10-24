@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: yamshchik
+    folder: Yamshchik
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

@@ -40,4 +40,8 @@ public record Attachment(
         HeaderRules.requireSingleLine("attachment media type", mediaType);
         HeaderRules.requireSingleLine("attachment contentId", contentId);
     }
+
+    public Attachment withStorageKey(String newStorageKey) {
+        return new Attachment(filename, mediaType, disposition, contentId, newStorageKey, size, sha256);
+    }
 }

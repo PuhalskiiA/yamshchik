@@ -17,6 +17,12 @@ import java.time.Duration;
 @ToString
 public class RetryProperties {
 
+    public static final String POLICY_PROPERTY = "yamshchik.dispatch.retry.policy";
+
+    public static final String POLICY_EXPONENTIAL = "exponential";
+
+    public static final String POLICY_FIXED = "fixed";
+
     @NotNull(message = "Должна быть выбрана политика повторов отправки!")
     private RetryPolicyType policy;
 

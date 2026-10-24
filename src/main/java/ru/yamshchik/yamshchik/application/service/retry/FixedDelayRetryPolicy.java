@@ -1,9 +1,11 @@
 package ru.yamshchik.yamshchik.application.service.retry;
 
-import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
+import ru.yamshchik.yamshchik.config.properties.RetryProperties;
+import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
 import ru.yamshchik.yamshchik.domain.DeliveryFailure;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -12,15 +14,18 @@ import java.util.Optional;
  * Исходный вариант для сравнения: любой отказ повторяется через одну и ту же паузу,
  * временные и постоянные отказы не различаются.
  */
-@RequiredArgsConstructor
+@Component
+@ConditionalOnProperty(name = RetryProperties.POLICY_PROPERTY, havingValue = RetryProperties.POLICY_FIXED)
 public class FixedDelayRetryPolicy implements RetryPolicy {
 
-    private final int maxAttempts;
+    private final RetryProperties retry;
 
-    private final Duration delay;
+    public FixedDelayRetryPolicy(YamshchikProperties properties) {
+        this.retry = properties.getDispatch().getRetry();
+    }
 
     @Override
     public Optional<Instant> nextAttemptAt(int attempts, DeliveryFailure failure, Instant now) {
-        return attempts >= maxAttempts ? Optional.empty() : Optional.of(now.plus(delay));
+        return attempts >= retry.getMaxAttempts() ? Optional.empty() : Optional.of(now.plus(retry.getInitialDelay()));
     }
 }

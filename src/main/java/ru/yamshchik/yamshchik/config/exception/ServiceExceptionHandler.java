@@ -17,6 +17,7 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import ru.yamshchik.yamshchik.config.exception.type.EmailNotFoundException;
 import ru.yamshchik.yamshchik.config.exception.type.EmailTooLargeException;
+import ru.yamshchik.yamshchik.config.exception.type.MissingAttachmentsException;
 import ru.yamshchik.yamshchik.config.exception.type.ServiceValidationException;
 
 import java.util.stream.Collectors;
@@ -34,6 +35,8 @@ public class ServiceExceptionHandler {
     private static final String VIOLATION_FORMAT = "%s: %s";
 
     private static final String INTERNAL_ERROR_DETAIL = "Internal service error";
+
+    private static final String MISSING_ATTACHMENTS_PROPERTY = "missingAttachments";
 
     @ExceptionHandler(ServiceValidationException.class)
     public ProblemDetail handleServiceValidationException(ServiceValidationException ex) {
@@ -93,6 +96,13 @@ public class ServiceExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ProblemDetail handleMaxUploadSizeExceededException(MaxUploadSizeExceededException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONTENT_TOO_LARGE, ex.getMessage());
+    }
+
+    @ExceptionHandler(MissingAttachmentsException.class)
+    public ProblemDetail handleMissingAttachmentsException(MissingAttachmentsException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setProperty(MISSING_ATTACHMENTS_PROPERTY, ex.getMissing());
+        return problem;
     }
 
     @ExceptionHandler(EmailTooLargeException.class)

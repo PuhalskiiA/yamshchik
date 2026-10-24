@@ -2,6 +2,8 @@ package ru.yamshchik.yamshchik.application.port.out;
 
 import ru.yamshchik.yamshchik.domain.Email;
 import ru.yamshchik.yamshchik.domain.EmailId;
+import ru.yamshchik.yamshchik.domain.EmailState;
+import ru.yamshchik.yamshchik.domain.TrafficClass;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -9,7 +11,8 @@ import java.util.Optional;
 
 
 /**
- * Очередь отправки. От реализации зависит, переживает ли очередь рестарт и какие гарантии доставки она даёт.
+ * Очередь отправки, своя для каждого класса трафика. От реализации зависит, переживает ли очередь рестарт
+ * и какие гарантии доставки она даёт.
  */
 public interface DispatchQueue {
 
@@ -18,13 +21,21 @@ public interface DispatchQueue {
      *
      * @param availableAt момент, раньше которого письмо в отправку не отдаётся
      */
-    void enqueue(EmailId id, Instant availableAt);
+    void enqueue(EmailId id, TrafficClass trafficClass, Instant availableAt);
 
     /**
-     * Атомарно забирает письмо, которое ждёт дольше всех, и переводит его в отправку на срок аренды.
-     * Одно письмо не достаётся двум вызывающим одновременно, пока аренда не истекла.
+     * Атомарно забирает письмо класса, которое ждёт дольше всех, и переводит его в отправку на срок аренды.
+     * Одно письмо не достаётся двум вызывающим одновременно, пока аренда не истекла. Письмо, аренда которого
+     * истекла посреди отправки, реализация может не отдавать сразу, а отложить до отчёта о прерванной попытке.
      *
-     * @return письмо уже в новом состоянии или пусто, если готовых к отправке писем нет
+     * @return письмо уже в новом состоянии или пусто, если готовых к отправке писем этого класса нет
      */
-    Optional<Email> claimNext(Instant now, Duration lease);
+    Optional<Email> claimNext(TrafficClass trafficClass, Instant now, Duration lease);
+
+    /**
+     * Продлевает аренду письма, которое ещё отправляется в той же попытке.
+     *
+     * @return false, если письмо уже забрал другой обработчик или итог попытки записан
+     */
+    boolean extendLease(EmailState sending, Instant leaseUntil);
 }

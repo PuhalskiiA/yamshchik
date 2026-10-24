@@ -118,3 +118,196 @@ databaseChangeLog:
             columns:
               - column:
                   name: email_id
+  - changeSet:
+      id: 0003-create-email-delivery
+      author: yamshchik
+      changes:
+        - createTable:
+            tableName: email_delivery
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_email_delivery
+              - column:
+                  name: email_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_email_delivery_email
+                    references: email(id)
+                    deleteCascade: true
+              - column:
+                  name: batch_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: recipient
+                  type: varchar(254)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: priority
+                  type: varchar(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: attempt
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: report_action
+                  type: varchar(16)
+              - column:
+                  name: report_status
+                  type: varchar(16)
+              - column:
+                  name: diagnostic
+                  type: text
+              - column:
+                  name: updated_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sent_at
+                  type: timestamptz
+              - column:
+                  name: incident_at
+                  type: timestamptz
+        - addUniqueConstraint:
+            tableName: email_delivery
+            constraintName: uq_email_delivery_recipient
+            columnNames: email_id, recipient
+        - createIndex:
+            tableName: email_delivery
+            indexName: ix_email_delivery_batch_id
+            columns:
+              - column:
+                  name: batch_id
+        - createIndex:
+            tableName: email_delivery
+            indexName: ix_email_delivery_status_sent_at
+            columns:
+              - column:
+                  name: status
+              - column:
+                  name: sent_at
+  - changeSet:
+      id: 0004-create-delivery-event
+      author: yamshchik
+      changes:
+        - createTable:
+            tableName: delivery_event
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_delivery_event
+              - column:
+                  name: email_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: batch_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: recipient
+                  type: varchar(254)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: outcome
+                  type: varchar(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: action
+                  type: varchar(16)
+              - column:
+                  name: status
+                  type: varchar(16)
+              - column:
+                  name: diagnostic
+                  type: text
+              - column:
+                  name: occurred_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: claimed_until
+                  type: timestamptz
+              - column:
+                  name: published_at
+                  type: timestamptz
+        - createIndex:
+            tableName: delivery_event
+            indexName: ix_delivery_event_published_at
+            columns:
+              - column:
+                  name: published_at
+              - column:
+                  name: occurred_at
+  - changeSet:
+      id: 0005-add-email-traffic-class
+      author: yamshchik
+      changes:
+        - addColumn:
+            tableName: email
+            columns:
+              - column:
+                  name: traffic_class
+                  type: varchar(8)
+                  defaultValue: BULK
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: email
+            indexName: ix_email_traffic_class_available_at
+            columns:
+              - column:
+                  name: traffic_class
+              - column:
+                  name: available_at
+  - changeSet:
+      id: 0006-add-email-attachment-deleted-at
+      author: yamshchik
+      changes:
+        - addColumn:
+            tableName: email_attachment
+            columns:
+              - column:
+                  name: deleted_at
+                  type: timestamptz
+        - createIndex:
+            tableName: email_attachment
+            indexName: ix_email_attachment_storage_key
+            columns:
+              - column:
+                  name: storage_key
+  - changeSet:
+      id: 0007-index-email-attachment-sha256
+      author: yamshchik
+      changes:
+        - createIndex:
+            tableName: email_attachment
+            indexName: ix_email_attachment_sha256
+            columns:
+              - column:
+                  name: sha256

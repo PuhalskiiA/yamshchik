@@ -29,6 +29,10 @@
     <properties>
         <java.version>25</java.version>
         <openapi-generator.version>7.25.0</openapi-generator.version>
+        <mapstruct.version>1.6.3</mapstruct.version>
+        <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+        <jacoco.version>0.8.15</jacoco.version>
+        <redisson.version>4.7.0</redisson.version>
         <aws-sdk.version>2.55.12</aws-sdk.version>
         <openapi.spec>${project.basedir}/src/main/resources/openapi/yamshchik-api.yaml</openapi.spec>
     </properties>
@@ -64,6 +68,15 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <!-- Стартер подключает реализацию только для запуска, а коды ответа SMTP доступны лишь через её классы -->
         <dependency>
             <groupId>org.eclipse.angus</groupId>
@@ -81,9 +94,24 @@
             </exclusions>
         </dependency>
         <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+        </dependency>
+        <!-- Общий для всех экземпляров темп отправки на каждый сервер получателя -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>${redisson.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+            <version>${mapstruct.version}</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -109,6 +137,17 @@
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
                         </path>
+                        <!-- Без связки MapStruct не видит методы доступа, которые создаёт Lombok -->
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok-mapstruct-binding</artifactId>
+                            <version>${lombok-mapstruct-binding.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.mapstruct</groupId>
+                            <artifactId>mapstruct-processor</artifactId>
+                            <version>${mapstruct.version}</version>
+                        </path>
                     </annotationProcessorPaths>
                 </configuration>
             </plugin>
@@ -116,6 +155,10 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <!-- mvnw spring-boot:run запускает приложение на локальном стенде -->
+                    <profiles>
+                        <profile>local</profile>
+                    </profiles>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>
@@ -123,6 +166,34 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <configuration>
+                    <!-- Сгенерированный код в покрытии не учитывается: интерфейсы и DTO из спеки, наследники MapStruct -->
+                    <excludes>
+                        <exclude>ru/yamshchik/yamshchik/adapter/in/rest/api/**</exclude>
+                        <exclude>ru/yamshchik/yamshchik/adapter/in/rest/dto/**</exclude>
+                        <exclude>**/*MapperImpl.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.openapitools</groupId>
@@ -159,5 +230,89 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Статический анализ для курсовой СППИ: mvnw -Psspi verify; отчёты в target/reports/spotbugs.html и target/reports/pmd.html.
+             Нарушения сборку не валят: нужны отчёты, а не барьер качества -->
+        <profile>
+            <id>sspi</id>
+            <properties>
+                <spotbugs-maven-plugin.version>4.10.5.0</spotbugs-maven-plugin.version>
+                <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version>
+                <pmd.version>7.28.0</pmd.version>
+                <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
+                <sonar.host.url>http://localhost:9002</sonar.host.url>
+                <!-- Интерфейсы и DTO, сгенерированные из спеки -->
+                <sonar.exclusions>**/adapter/in/rest/api/**,**/adapter/in/rest/dto/**</sonar.exclusions>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs-maven-plugin</artifactId>
+                        <version>${spotbugs-maven-plugin.version}</version>
+                        <configuration>
+                            <effort>Max</effort>
+                            <threshold>Low</threshold>
+                            <htmlOutput>true</htmlOutput>
+                            <failOnError>false</failOnError>
+                            <excludeFilterFile>${project.basedir}/docs/sspi/spotbugs-exclude.xml</excludeFilterFile>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>spotbugs</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-pmd-plugin</artifactId>
+                        <version>${maven-pmd-plugin.version}</version>
+                        <!-- Плагин по умолчанию несёт PMD старее, чем нужно для Java 25 -->
+                        <dependencies>
+                            <dependency>
+                                <groupId>net.sourceforge.pmd</groupId>
+                                <artifactId>pmd-core</artifactId>
+                                <version>${pmd.version}</version>
+                            </dependency>
+                            <dependency>
+                                <groupId>net.sourceforge.pmd</groupId>
+                                <artifactId>pmd-java</artifactId>
+                                <version>${pmd.version}</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <targetJdk>${java.version}</targetJdk>
+                            <!-- Набор по умолчанию слишком узкий и содержит правила, которые PMD снимает с поддержки -->
+                            <rulesets>
+                                <ruleset>/rulesets/java/quickstart.xml</ruleset>
+                            </rulesets>
+                            <linkXRef>false</linkXRef>
+                            <failOnViolation>false</failOnViolation>
+                            <excludeRoots>
+                                <excludeRoot>${project.build.directory}/generated-sources</excludeRoot>
+                            </excludeRoots>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>pmd</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonarsource.scanner.maven</groupId>
+                        <artifactId>sonar-maven-plugin</artifactId>
+                        <version>${sonar-maven-plugin.version}</version>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

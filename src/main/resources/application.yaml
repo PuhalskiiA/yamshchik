@@ -1,10 +1,8 @@
+# Общие настройки. Всё, что зависит от стенда (адреса и учётные записи БД, почтового сервера
+# и хранилища вложений), лежит в application-<стенд>.yaml; для локального запуска — профиль local.
 spring:
   application:
     name: yamshchik
-  datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/yamshchik}
-    username: ${DB_USERNAME:yamshchik}
-    password: ${DB_PASSWORD:yamshchik}
   jpa:
     open-in-view: false
     hibernate:
@@ -12,45 +10,97 @@ spring:
   liquibase:
     change-log: classpath:/db/changelog/db.changelog-master.yaml
   mail:
-    host: ${SMTP_HOST:localhost}
-    port: ${SMTP_PORT:1025}
-    username: ${SMTP_USERNAME:}
-    password: ${SMTP_PASSWORD:}
     default-encoding: UTF-8
     properties:
       mail.mime.allowutf8: true
-      # Просим сервер, если он поддерживает DSN, сообщать об отказе и задержке доставки; в отчёт — только заголовки письма
-      mail.smtp.dsn.notify: FAILURE,DELAY
+      # Просим сервер, если он поддерживает DSN, сообщать о доставке, отказе и задержке; в отчёт — только заголовки письма
+      mail.smtp.dsn.notify: SUCCESS,FAILURE,DELAY
       mail.smtp.dsn.ret: HDRS
       mail.smtp.connectiontimeout: 10000
       mail.smtp.timeout: 10000
       mail.smtp.writetimeout: 10000
   jackson:
     default-property-inclusion: non_null
+  task:
+    scheduling:
+      pool:
+        # Отправка, чтение отчётов, публикация событий и уборка хранилища не должны ждать друг друга
+        size: 4
   servlet:
     multipart:
       max-file-size: 25MB
       max-request-size: 30MB
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
 yamshchik:
   dispatch:
     queue: ${DISPATCH_QUEUE:postgres}
     poll-interval: PT1S
+    workers: ${DISPATCH_WORKERS:4}
     lease: PT5M
+    interrupted-wait: ${INTERRUPTED_WAIT:PT2M}
     retry:
       policy: ${RETRY_POLICY:exponential}
       max-attempts: ${RETRY_MAX_ATTEMPTS:5}
       initial-delay: ${RETRY_INITIAL_DELAY:PT30S}
       max-delay: ${RETRY_MAX_DELAY:PT1H}
+    rate-limit:
+      strategy: ${RATE_LIMIT_STRATEGY:none}
+      # Писем в секунду: постоянный темп для fixed, начальный для aimd
+      rate: ${RATE_LIMIT_RATE:10}
+      urgent-share: ${RATE_LIMIT_URGENT_SHARE:0.2}
+      burst: PT1S
+      min-rate: ${RATE_LIMIT_MIN_RATE:0.05}
+      max-rate: ${RATE_LIMIT_MAX_RATE:100}
+      increase: ${RATE_LIMIT_INCREASE:0.5}
+      increase-interval: ${RATE_LIMIT_INCREASE_INTERVAL:PT5S}
+      decrease-factor: ${RATE_LIMIT_DECREASE_FACTOR:0.5}
+      decrease-cooldown: ${RATE_LIMIT_DECREASE_COOLDOWN:PT5S}
+    # Темп на каждый сервер получателя, общий для всех экземпляров: none — не ограничивается, redis — хранится в Redis
+    destination-limit:
+      mode: ${DESTINATION_LIMIT:none}
+      # aimd — рост на шаг и падение в несколько раз; estimate — по оценке того, сколько сервер реально принимает
+      algorithm: ${DESTINATION_ALGORITHM:estimate}
+      initial-rate: ${DESTINATION_INITIAL_RATE:5}
+      min-rate: ${DESTINATION_MIN_RATE:0.05}
+      max-rate: ${DESTINATION_MAX_RATE:100}
+      # Письма идут ровным шагом: серверы получателей часто не принимают два письма в один момент
+      burst: PT0.1S
+      increase: ${DESTINATION_INCREASE:0.5}
+      increase-interval: ${DESTINATION_INCREASE_INTERVAL:PT5S}
+      decrease-factor: ${DESTINATION_DECREASE_FACTOR:0.5}
+      decrease-cooldown: ${DESTINATION_DECREASE_COOLDOWN:PT5S}
+      estimate-window: PT2S
+      estimate-window-messages: 5
+      probe-gain: 1.25
+      cruise-windows: 3
+      backoff: 0.9
+      history-windows: 10
+      unavailable-wait: PT1S
   intake:
     max-message-size: 25MB
     max-recipients: 100
     max-attachments: 10
-    allowed-sender-domains: ${ALLOWED_SENDER_DOMAINS:}
   storage:
-    endpoint: ${S3_ENDPOINT:http://localhost:9000}
-    region: ${S3_REGION:us-east-1}
-    bucket: ${S3_BUCKET:yamshchik}
-    access-key: ${S3_ACCESS_KEY:yamshchik}
-    secret-key: ${S3_SECRET_KEY:yamshchik-secret}
-    path-style-access: true
+    type: ${ATTACHMENT_STORAGE:s3}
+    cleanup:
+      capacity: ${ATTACHMENT_STORAGE_CAPACITY:10GB}
+      threshold-percent: 75
+      min-age: P3D
+      interval: PT10M
+      batch-size: 100
+  reports:
+    folder: INBOX
+    poll-interval: PT10S
+    batch-size: 100
+    important-timeout: ${REPORT_IMPORTANT_TIMEOUT:PT30M}
+  events:
+    topic: yamshchik-delivery-events
+    poll-interval: PT1S
+    batch-size: 100
+    lease: PT1M

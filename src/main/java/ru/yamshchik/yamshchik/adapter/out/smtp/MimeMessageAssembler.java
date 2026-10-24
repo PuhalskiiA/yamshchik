@@ -48,6 +48,8 @@ public class MimeMessageAssembler {
 
     public static final String EMAIL_ID_HEADER = "X-Yamshchik-Email-Id";
 
+    public static final String ATTEMPT_HEADER = "X-Yamshchik-Attempt";
+
     private static final String CHARSET = StandardCharsets.UTF_8.name();
 
     private static final String SUBTYPE_MIXED = "mixed";
@@ -57,6 +59,12 @@ public class MimeMessageAssembler {
     private static final String SUBTYPE_ALTERNATIVE = "alternative";
 
     private static final String SUBTYPE_PLAIN = "plain";
+
+    private static final String MESSAGE_ID_HEADER = "Message-ID";
+
+    private static final String MESSAGE_ID_FORMAT = "<%s@%s>";
+
+    private static final char ADDRESS_SEPARATOR = '@';
 
     private static final String PRIORITY_HEADER = "X-Priority";
 
@@ -87,8 +95,10 @@ public class MimeMessageAssembler {
         for (Map.Entry<String, String> header : message.headers().entrySet()) {
             target.setHeader(header.getKey(), MimeUtility.encodeText(header.getValue(), CHARSET, null));
         }
-        // По этому заголовку отчёт о доставке сопоставляется с исходным письмом
+        // По этим заголовкам отчёт о доставке сопоставляется с исходным письмом
         target.setHeader(EMAIL_ID_HEADER, email.id().toString());
+        // По номеру попытки отбрасываются отчёты о прошлых попытках, пришедшие после повторной отправки
+        target.setHeader(ATTEMPT_HEADER, Integer.toString(email.state().attempts()));
         if (message.priority() != Priority.NORMAL) {
             target.setHeader(PRIORITY_HEADER, PRIORITY_VALUES.get(message.priority()));
             target.setHeader(IMPORTANCE_HEADER, IMPORTANCE_VALUES.get(message.priority()));
@@ -98,6 +108,9 @@ public class MimeMessageAssembler {
         List<Attachment> regular = filter(email.attachments(), AttachmentDisposition.ATTACHMENT);
         fillMixed(target, message.body(), inline, regular);
         target.saveChanges();
+        // Один и тот же идентификатор во всех попытках: по нему получатель может отбросить повторную доставку.
+        // Ставится после saveChanges, иначе библиотека заменит его случайным
+        target.setHeader(MESSAGE_ID_HEADER, MESSAGE_ID_FORMAT.formatted(email.id(), domainOf(message.from())));
     }
 
     private void fillMixed(
@@ -192,6 +205,10 @@ public class MimeMessageAssembler {
         InternetAddress address = new InternetAddress(mailbox.address(), mailbox.name(), CHARSET);
         address.validate();
         return address;
+    }
+
+    private static String domainOf(Mailbox mailbox) {
+        return mailbox.address().substring(mailbox.address().lastIndexOf(ADDRESS_SEPARATOR) + 1);
     }
 
     private static List<Attachment> filter(List<Attachment> attachments, AttachmentDisposition disposition) {

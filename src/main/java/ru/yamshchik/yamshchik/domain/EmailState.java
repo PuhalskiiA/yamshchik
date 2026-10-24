@@ -23,6 +23,8 @@ public record EmailState(
         Instant availableAt
 ) {
 
+    private static final String INTERRUPTED_ERROR = "Attempt %d was interrupted, waiting for its delivery report";
+
     public EmailState {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(status, "status");
@@ -35,17 +37,26 @@ public record EmailState(
     }
 
     /**
-     * Берёт письмо в отправку на срок аренды. Отправляемое письмо можно взять повторно,
-     * только когда аренда предыдущего обработчика истекла.
+     * Берёт письмо в отправку на срок аренды. Письмо, отправка которого прервалась, сначала проходит
+     * через {@link #interrupted}, напрямую в отправку оно не берётся.
      */
     public EmailState startSending(Instant now, Duration lease) {
-        boolean waiting = status == EmailStatus.ACCEPTED || status == EmailStatus.DEFERRED
-                || status == EmailStatus.SENDING;
+        boolean waiting = status == EmailStatus.ACCEPTED || status == EmailStatus.DEFERRED;
         if (!waiting || availableAt == null || availableAt.isAfter(now)) {
             throw transitionNotAllowed(EmailStatus.SENDING);
         }
         return new EmailState(id, EmailStatus.SENDING, attempts + 1, lastError, createdAt, now, null,
                               now.plus(lease));
+    }
+
+    /**
+     * Письмо взяли в отправку, но сервер получателя сейчас не может принять его по темпу: письмо возвращается
+     * в ожидание, а попытка не считается — письмо серверу не передавалось.
+     */
+    public EmailState postponed(Instant now, Instant availableAfter) {
+        requireSending(EmailStatus.DEFERRED);
+        Objects.requireNonNull(availableAfter, "availableAfter");
+        return new EmailState(id, EmailStatus.DEFERRED, attempts - 1, lastError, createdAt, now, null, availableAfter);
     }
 
     public EmailState sent(Instant now) {
@@ -55,6 +66,33 @@ public record EmailState(
 
     public EmailState deferred(String error, Instant now, Instant nextAttemptAt) {
         requireSending(EmailStatus.DEFERRED);
+        Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+        return new EmailState(id, EmailStatus.DEFERRED, attempts, error, createdAt, now, null, nextAttemptAt);
+    }
+
+    /**
+     * Отправка прервалась: аренда истекла, а итог не записан — обработчик, скорее всего, упал. Сервер мог
+     * успеть принять письмо, поэтому сразу оно не отправляется: сначала ждёт отчёта о прерванной попытке.
+     *
+     * @param waitUntil до какого момента ждать отчёта; после — письмо уходит снова
+     */
+    public EmailState interrupted(Instant now, Instant waitUntil) {
+        if (status != EmailStatus.SENDING || availableAt == null || availableAt.isAfter(now)) {
+            throw transitionNotAllowed(EmailStatus.DEFERRED);
+        }
+        Objects.requireNonNull(waitUntil, "waitUntil");
+        return new EmailState(id, EmailStatus.DEFERRED, attempts, INTERRUPTED_ERROR.formatted(attempts), createdAt,
+                              now, null, waitUntil);
+    }
+
+    /**
+     * Сервер принял письмо, но потом сообщил об отказе по временной причине: письмо уйдёт ещё раз
+     * тем получателям, по которым пришёл отказ.
+     */
+    public EmailState deferredByReport(String error, Instant now, Instant nextAttemptAt) {
+        if (status != EmailStatus.SENT) {
+            throw transitionNotAllowed(EmailStatus.DEFERRED);
+        }
         Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
         return new EmailState(id, EmailStatus.DEFERRED, attempts, error, createdAt, now, null, nextAttemptAt);
     }

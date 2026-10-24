@@ -1,5 +1,7 @@
-# Окружение для локального запуска: БД, хранилище вложений MinIO (консоль на http://localhost:9001)
-# и почтовый сервер-ловушка (веб-интерфейс на http://localhost:8025)
+# Окружение для локального запуска: БД, хранилище вложений MinIO (консоль на http://localhost:9001),
+# свой почтовый сервер с отчётами о доставке, почтовый сервер-ловушка (веб-интерфейс на http://localhost:8025)
+# Kafka для событий о доставке, заглушка сервера получателя с пределом темпа, Prometheus (http://localhost:9090)
+# и Grafana (http://localhost:3000, вход без пароля)
 services:
   postgres:
     image: postgres:17
@@ -45,7 +47,143 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
+  # Свой почтовый сервер с ящиками и отчётами о доставке. SMTP на 2525, IMAP на 1143;
+  # учётная запись сервиса — noreply@yamshchik.test / yamshchik-secret, местный получатель —
+  # user@yamshchik.test / user-secret. Письма на остальные домены уходят в Mailpit
+  mailserver:
+    build: stand/mailserver
+    image: yamshchik-mailserver:local
+    hostname: mail.yamshchik.test
+    environment:
+      # Куда пересылать письма на чужие домены: [mailpit]:1025 или [smtp-stub]:2525
+      RELAYHOST: ${MAILSERVER_RELAYHOST:-[mailpit]:1025}
+      # Свой предел темпа Postfix: пауза между письмами одному серверу, например 10s; пусто — без паузы
+      RATE_DELAY: ${MAILSERVER_RATE_DELAY:-}
+      CONCURRENCY: ${MAILSERVER_CONCURRENCY:-}
+    ports:
+      - "2525:25"
+      - "1143:143"
+    depends_on:
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 25 && nc -z 127.0.0.1 143"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  # Заглушка почтового сервера получателя: принимает письма в никуда, ограничивает темп и считает повторы.
+  # SMTP на 2526, настройки и показатели на http://localhost:8026 (PUT /config?rate=5&burst=1&penalty=0, GET /metrics)
+  smtp-stub:
+    build: stand/smtp-stub
+    image: yamshchik-smtp-stub:local
+    environment:
+      STUB_RATE: ${STUB_RATE:-0}
+      STUB_BURST: ${STUB_BURST:-1}
+      STUB_PENALTY: ${STUB_PENALTY:-0}
+    ports:
+      - "2526:2525"
+      - "8026:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/2525'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=30d"]
+    volumes:
+      - ./stand/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9090:9090"
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/yamshchik.json
+    volumes:
+      - ./stand/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./stand/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+  # Redis: темп отправки на каждый сервер получателя, общий для всех экземпляров сервиса
+  redis:
+    image: redis:7.4.2-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  # Kafka: события о доставке, а при ATTACHMENT_STORAGE=kafka — ещё и вложения
+  kafka:
+    image: apache/kafka:4.1.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # PLAINTEXT — для приложения с хоста, INTERNAL — для контейнеров
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Вложение — одно сообщение, поэтому предел размера сообщения поднят с 1 МБ до 32 МБ
+      KAFKA_MESSAGE_MAX_BYTES: 33554432
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 33554432
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+  # Само приложение в контейнере: docker compose --profile app up -d --build
+  app:
+    profiles: ["app"]
+    build: .
+    image: yamshchik:local
+    environment:
+      # Профиль local, но службы доступны по именам контейнеров, а не на localhost
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/yamshchik
+      SPRING_MAIL_HOST: mailserver
+      SPRING_MAIL_PORT: 25
+      YAMSHCHIK_REPORTS_HOST: mailserver
+      YAMSHCHIK_REPORTS_PORT: 143
+      YAMSHCHIK_EVENTS_BOOTSTRAP_SERVERS: kafka:29092
+      YAMSHCHIK_DISPATCH_DESTINATION_LIMIT_REDIS_ADDRESS: redis://redis:6379
+      YAMSHCHIK_STORAGE_S3_ENDPOINT: http://minio:9000
+      YAMSHCHIK_STORAGE_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      ATTACHMENT_STORAGE: ${ATTACHMENT_STORAGE:-s3}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mailserver:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
+  prometheus-data:
   postgres-data:
   minio-data:
+  kafka-data:

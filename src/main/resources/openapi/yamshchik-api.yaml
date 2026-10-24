@@ -30,7 +30,9 @@ paths:
                 email:
                   $ref: '#/components/schemas/EmailRequest'
                 attachments:
-                  description: Файлы вложений. Параметры вложения задаются в `email.attachmentOptions` по имени файла.
+                  description: >-
+                    Файлы вложений. Каждый файл описывается в `email.attachmentOptions` с тем же именем.
+                    Файл можно не присылать, если вложение с такой же контрольной суммой сервис уже принимал.
                   type: array
                   maxItems: 100
                   items:
@@ -45,9 +47,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailState'
+                $ref: '#/components/schemas/EmailSubmission'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/MissingAttachments'
         '413':
           $ref: '#/components/responses/ContentTooLarge'
   /api/v1/emails/{emailId}:
@@ -80,6 +84,14 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    MissingAttachments:
+      description: >-
+        Файлы части вложений не присланы, а вложений с такими контрольными суммами у сервиса нет.
+        Повторите запрос, приложив эти файлы.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/MissingAttachmentsProblem'
     ContentTooLarge:
       description: Запрос или письмо после кодирования превышает допустимый размер
       content:
@@ -98,12 +110,10 @@ components:
       description: >-
         Письмо. Должен быть указан хотя бы один получатель (`to`, `cc` или `bcc`)
         и хотя бы что-то из содержимого: `body.text`, `body.html` или вложение.
+        Отправитель в запросе не задаётся: все письма уходят от учётной записи сервиса.
       required:
-        - from
         - subject
       properties:
-        from:
-          $ref: '#/components/schemas/Mailbox'
         replyTo:
           $ref: '#/components/schemas/Mailbox'
         to:
@@ -121,6 +131,12 @@ components:
           maxItems: 1000
           items:
             $ref: '#/components/schemas/Mailbox'
+        personal:
+          description: >-
+            Персональная отправка: каждому получателю из `to` уходит отдельное письмо,
+            в котором он единственный получатель. `cc` и `bcc` при этом не допускаются.
+          type: boolean
+          default: false
         subject:
           type: string
           maxLength: 998
@@ -141,7 +157,7 @@ components:
           example:
             X-Campaign: weekly-report
         attachmentOptions:
-          description: Параметры вложений. Файл без записи здесь отправляется обычным вложением.
+          description: Описание каждого вложения письма, в том порядке, в каком они будут в письме.
           type: array
           maxItems: 100
           items:
@@ -182,12 +198,20 @@ components:
       type: object
       required:
         - filename
+        - sha256
       properties:
         filename:
           description: Имя загруженного файла, к которому относятся параметры
           type: string
           maxLength: 255
           example: logo.png
+        sha256:
+          description: >-
+            Контрольная сумма SHA-256 содержимого файла, 64 шестнадцатеричных символа в нижнем регистре.
+            Присланный файл с ней сверяется; если файл не прислан, вложение берётся из ранее принятых по этой сумме.
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
         disposition:
           $ref: '#/components/schemas/AttachmentDisposition'
         contentId:
@@ -201,16 +225,35 @@ components:
       enum:
         - ATTACHMENT
         - INLINE
+    EmailSubmission:
+      type: object
+      description: Результат приёма запроса
+      required:
+        - emails
+      properties:
+        emails:
+          description: >-
+            Принятые письма. Одно письмо, а при персональной отправке — по одному
+            на каждого получателя, в порядке списка `to`.
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailState'
     EmailState:
       type: object
       required:
         - id
+        - batchId
         - status
         - attempts
         - createdAt
         - updatedAt
+        - deliveries
       properties:
         id:
+          type: string
+          format: uuid
+        batchId:
+          description: Общий идентификатор писем, принятых одним запросом
           type: string
           format: uuid
         status:
@@ -235,18 +278,86 @@ components:
           description: Когда будет следующая попытка. Задано только в статусе `DEFERRED`.
           type: string
           format: date-time
+        deliveries:
+          description: Доставка письма каждому получателю, включая копии и скрытые копии
+          type: array
+          items:
+            $ref: '#/components/schemas/Delivery'
+    Delivery:
+      type: object
+      required:
+        - recipient
+        - status
+        - updatedAt
+      properties:
+        recipient:
+          type: string
+          example: user@example.com
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        reportAction:
+          $ref: '#/components/schemas/ReportAction'
+        reportStatus:
+          description: Расширенный статус из последнего отчёта о доставке (RFC 3463)
+          type: string
+          example: 5.1.1
+        diagnostic:
+          description: Ответ почтового сервера из последнего отчёта или причина отказа при отправке
+          type: string
+        sentAt:
+          description: Когда почтовый сервер принял письмо для этого получателя
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    DeliveryStatus:
+      type: string
+      description: >-
+        `PENDING` — сервер ещё не принял письмо для получателя; `SENT` — принял, отчёт о доставке не пришёл;
+        `DELIVERED` — доставлено или передано дальше; `UNDELIVERED` — доставить не удалось, попыток больше не будет.
+      enum:
+        - PENDING
+        - SENT
+        - DELIVERED
+        - UNDELIVERED
+    ReportAction:
+      type: string
+      description: >-
+        Действие из последнего отчёта о доставке: `DELIVERED` — доставлено в ящик; `RELAYED` — передано серверу,
+        который отчётов не присылает; `EXPANDED` — доставлено и разослано дальше; `DELAYED` — сервер пока не смог
+        доставить и пробует сам; `FAILED` — сервер отказался от доставки.
+      enum:
+        - DELIVERED
+        - RELAYED
+        - EXPANDED
+        - DELAYED
+        - FAILED
     EmailStatus:
       type: string
       description: >-
         `ACCEPTED` — принято и ждёт отправки; `SENDING` — передаётся почтовому серверу;
         `DEFERRED` — попытка не удалась, письмо ждёт следующей;
-        `SENT` — почтовый сервер принял письмо; `FAILED` — отправить не удалось, попыток больше не будет.
+        `SENT` — почтовый сервер принял письмо, итог по получателям — в `deliveries`; `FAILED` — отправить не удалось, попыток больше не будет.
       enum:
         - ACCEPTED
         - SENDING
         - DEFERRED
         - SENT
         - FAILED
+    MissingAttachmentsProblem:
+      description: Описание ошибки по RFC 9457 со списком недостающих вложений
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required:
+            - missingAttachments
+          properties:
+            missingAttachments:
+              description: Контрольные суммы вложений, файлы которых нужно приложить
+              type: array
+              items:
+                type: string
     Problem:
       type: object
       description: Описание ошибки по RFC 9457
