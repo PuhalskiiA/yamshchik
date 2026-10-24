@@ -61,6 +61,27 @@ yamshchik:
       increase-interval: ${RATE_LIMIT_INCREASE_INTERVAL:PT5S}
       decrease-factor: ${RATE_LIMIT_DECREASE_FACTOR:0.5}
       decrease-cooldown: ${RATE_LIMIT_DECREASE_COOLDOWN:PT5S}
+    # Темп на каждый сервер получателя, общий для всех экземпляров: none — не ограничивается, redis — хранится в Redis
+    destination-limit:
+      mode: ${DESTINATION_LIMIT:none}
+      # aimd — рост на шаг и падение в несколько раз; estimate — по оценке того, сколько сервер реально принимает
+      algorithm: ${DESTINATION_ALGORITHM:estimate}
+      initial-rate: ${DESTINATION_INITIAL_RATE:5}
+      min-rate: ${DESTINATION_MIN_RATE:0.05}
+      max-rate: ${DESTINATION_MAX_RATE:100}
+      # Письма идут ровным шагом: серверы получателей часто не принимают два письма в один момент
+      burst: PT0.1S
+      increase: ${DESTINATION_INCREASE:0.5}
+      increase-interval: ${DESTINATION_INCREASE_INTERVAL:PT5S}
+      decrease-factor: ${DESTINATION_DECREASE_FACTOR:0.5}
+      decrease-cooldown: ${DESTINATION_DECREASE_COOLDOWN:PT5S}
+      estimate-window: PT2S
+      estimate-window-messages: 5
+      probe-gain: 1.25
+      cruise-windows: 3
+      backoff: 0.9
+      history-windows: 10
+      unavailable-wait: PT1S
   intake:
     max-message-size: 25MB
     max-recipients: 100

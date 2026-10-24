@@ -112,6 +112,16 @@ services:
       - prometheus
     ports:
       - "3000:3000"
+  # Redis: темп отправки на каждый сервер получателя, общий для всех экземпляров сервиса
+  redis:
+    image: redis:7.4.2-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
   # Kafka: события о доставке, а при ATTACHMENT_STORAGE=kafka — ещё и вложения
   kafka:
     image: apache/kafka:4.1.0
@@ -154,6 +164,7 @@ services:
       YAMSHCHIK_REPORTS_HOST: mailserver
       YAMSHCHIK_REPORTS_PORT: 143
       YAMSHCHIK_EVENTS_BOOTSTRAP_SERVERS: kafka:29092
+      YAMSHCHIK_DISPATCH_DESTINATION_LIMIT_REDIS_ADDRESS: redis://redis:6379
       YAMSHCHIK_STORAGE_S3_ENDPOINT: http://minio:9000
       YAMSHCHIK_STORAGE_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       ATTACHMENT_STORAGE: ${ATTACHMENT_STORAGE:-s3}
@@ -167,6 +178,8 @@ services:
       mailserver:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:

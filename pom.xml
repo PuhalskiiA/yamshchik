@@ -32,6 +32,7 @@
         <mapstruct.version>1.6.3</mapstruct.version>
         <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
         <jacoco.version>0.8.15</jacoco.version>
+        <redisson.version>4.7.0</redisson.version>
         <aws-sdk.version>2.55.12</aws-sdk.version>
         <openapi.spec>${project.basedir}/src/main/resources/openapi/yamshchik-api.yaml</openapi.spec>
     </properties>
@@ -95,6 +96,12 @@
         <dependency>
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
+        </dependency>
+        <!-- Общий для всех экземпляров темп отправки на каждый сервер получателя -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>${redisson.version}</version>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>

@@ -42,6 +42,8 @@ public class MicrometerEmailMetrics implements EmailMetrics {
 
     private static final String DELIVERY_STATUS_GAUGE = "yamshchik.deliveries.by.status";
 
+    private static final String POSTPONED_COUNTER = "yamshchik.dispatch.postponed";
+
     private static final String REPORT_TIMER = "yamshchik.deliveries.report.time";
 
     private static final String INCIDENT_COUNTER = "yamshchik.deliveries.incidents";
@@ -170,6 +172,15 @@ public class MicrometerEmailMetrics implements EmailMetrics {
                     .register(registry)
                     .record(Duration.between(result.createdAt(), result.sentAt()));
         }
+    }
+
+    @Override
+    public void postponed(TrafficClass trafficClass) {
+        Counter.builder(POSTPONED_COUNTER)
+                .description("Писем, возвращённых в ожидание: сервер получателя сейчас не принимает по темпу")
+                .tag(CLASS_TAG, tag(trafficClass))
+                .register(registry)
+                .increment();
     }
 
     @Override

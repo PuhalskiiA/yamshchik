@@ -23,6 +23,11 @@ public interface EmailMetrics {
     void attemptCompleted(EmailState result, TrafficClass trafficClass, DeliveryFailure failure, Duration transportTime);
 
     /**
+     * Письмо взяли в отправку, но вернули в ожидание: сервер получателя сейчас не принимает по темпу.
+     */
+    void postponed(TrafficClass trafficClass);
+
+    /**
      * Применён отчёт о доставке.
      *
      * @param sinceSent сколько прошло от приёма письма сервером до отчёта

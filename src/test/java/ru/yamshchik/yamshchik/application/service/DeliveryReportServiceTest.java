@@ -9,9 +9,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.yamshchik.yamshchik.TestData;
 import ru.yamshchik.yamshchik.application.port.out.DeliveryReportSource;
+import ru.yamshchik.yamshchik.application.port.out.DestinationRateLimiter;
 import ru.yamshchik.yamshchik.application.port.out.DispatchQueue;
 import ru.yamshchik.yamshchik.application.port.out.EmailMetrics;
 import ru.yamshchik.yamshchik.application.port.out.EmailRepository;
+import ru.yamshchik.yamshchik.application.service.ratelimit.SendSignal;
 import ru.yamshchik.yamshchik.application.service.retry.RetryPolicy;
 import ru.yamshchik.yamshchik.config.properties.ReportProperties;
 import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
@@ -34,6 +36,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,6 +47,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static ru.yamshchik.yamshchik.TestData.LEASE;
 import static ru.yamshchik.yamshchik.TestData.NOW;
@@ -76,6 +80,9 @@ class DeliveryReportServiceTest {
     @Mock
     private EmailMetrics metrics;
 
+    @Mock
+    private DestinationRateLimiter destinationLimiter;
+
     private final EmailId emailId = EmailId.newId();
 
     // Что обработчик ответил ящику по каждому письму: true — отчёт обработан и письмо помечается прочитанным
@@ -91,7 +98,7 @@ class DeliveryReportServiceTest {
         YamshchikProperties properties = new YamshchikProperties();
         properties.setReports(reports);
         service = new DeliveryReportService(reportSource, emailRepository, dispatchQueue, retryPolicy, metrics,
-                                            properties, Clock.fixed(NOW, ZoneOffset.UTC));
+                                            destinationLimiter, properties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -346,6 +353,28 @@ class DeliveryReportServiceTest {
 
         assertThat(acknowledged).containsExactly(true);
         verify(emailRepository, never()).saveReportResult(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Отчёт о задержке по темпу снижает темп сервера получателя")
+    void throttlingReportSlowsDownDestination() {
+        waiting(1);
+        saves(true);
+
+        process(new DeliveryReport(emailId, 1, RECIPIENT, ReportAction.DELAYED, "4.7.0", "421 4.7.0 Try again later"));
+
+        verify(destinationLimiter).onResult(Set.of("example.org"), SendSignal.THROTTLED);
+    }
+
+    @Test
+    @DisplayName("Отчёт о доставке и задержка не по темпу темп сервера не трогают")
+    void otherReportsDoNotAffectDestinationRate() {
+        waiting(1);
+        saves(true);
+
+        process(report(1, ReportAction.DELAYED, "4.2.2"));
+
+        verifyNoInteractions(destinationLimiter);
     }
 
     private void process(DeliveryReport... reports) {

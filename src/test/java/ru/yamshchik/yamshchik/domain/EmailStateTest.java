@@ -170,6 +170,19 @@ class EmailStateTest {
     }
 
     @Test
+    @DisplayName("Письмо, отложенное по темпу сервера получателя, теряет попытку: серверу оно не передавалось")
+    void postponed() {
+        EmailState postponed = sending().postponed(NOW, NOW.plusSeconds(2));
+
+        assertThat(postponed.status()).isEqualTo(EmailStatus.DEFERRED);
+        assertThat(postponed.attempts())
+                .overridingErrorMessage("Отложенная по темпу отправка не должна приближать письмо к исчерпанию попыток")
+                .isZero();
+        assertThat(postponed.availableAt()).isEqualTo(NOW.plusSeconds(2));
+        assertThat(postponed.startSending(NOW.plusSeconds(2), LEASE).attempts()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("Пока аренда не истекла, попытка прерванной не считается")
     void notInterruptedWithinLease() {
         assertThatThrownBy(() -> sending().interrupted(NOW.plus(LEASE).minusMillis(1), NOW.plus(LEASE)))

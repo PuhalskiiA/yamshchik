@@ -57,6 +57,15 @@ public interface EmailEntityRepository extends JpaRepository<EmailEntity, UUID> 
             Instant availableAt
     );
 
+    @Modifying
+    @Query("""
+            UPDATE EmailEntity e
+            SET e.status = :status, e.attempts = :attempts, e.updatedAt = :updatedAt, e.availableAt = :availableAt
+            WHERE e.id = :id AND e.status = :expectedStatus AND e.attempts = :expectedAttempts
+            """)
+    int postpone(UUID id, EmailStatus expectedStatus, int expectedAttempts, EmailStatus status, int attempts,
+                 Instant updatedAt, Instant availableAt);
+
     // Номер попытки в условии отсекает итог обработчика, у которого письмо уже забрали по истечении аренды
     @Modifying
     @Query("""

@@ -72,4 +72,11 @@ public class DispatchProperties {
     @NotNull(message = "Обязательно должны быть указаны параметры ограничения темпа отправки!")
     @Valid
     private RateLimitProperties rateLimit;
+
+    /**
+     * Темп отправки на каждый сервер получателя, общий для всех экземпляров.
+     */
+    @NotNull(message = "Обязательно должны быть указаны параметры темпа на сервер получателя!")
+    @Valid
+    private DestinationLimitProperties destinationLimit;
 }

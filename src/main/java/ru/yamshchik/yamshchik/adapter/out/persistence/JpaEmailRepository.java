@@ -99,6 +99,15 @@ public class JpaEmailRepository implements EmailRepository {
         return true;
     }
 
+    // Отложенное письмо потеряло одну попытку, поэтому обработчик узнаётся по номеру попытки на единицу больше
+    @Override
+    @Transactional
+    public boolean savePostponed(EmailState postponed) {
+        return entityRepository.postpone(postponed.id().value(), EmailStatus.SENDING, postponed.attempts() + 1,
+                                         postponed.status(), postponed.attempts(), postponed.updatedAt(),
+                                         postponed.availableAt()) > 0;
+    }
+
     @Override
     public List<Delivery> findDeliveries(EmailId id) {
         return deliveryRepository.findByEmailIdOrderById(id.value()).stream().map(mapper::toDelivery).toList();

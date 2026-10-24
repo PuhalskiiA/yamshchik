@@ -49,6 +49,16 @@ public record EmailState(
                               now.plus(lease));
     }
 
+    /**
+     * Письмо взяли в отправку, но сервер получателя сейчас не может принять его по темпу: письмо возвращается
+     * в ожидание, а попытка не считается — письмо серверу не передавалось.
+     */
+    public EmailState postponed(Instant now, Instant availableAfter) {
+        requireSending(EmailStatus.DEFERRED);
+        Objects.requireNonNull(availableAfter, "availableAfter");
+        return new EmailState(id, EmailStatus.DEFERRED, attempts - 1, lastError, createdAt, now, null, availableAfter);
+    }
+
     public EmailState sent(Instant now) {
         requireSending(EmailStatus.SENT);
         return new EmailState(id, EmailStatus.SENT, attempts, null, createdAt, now, now, null);

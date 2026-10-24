@@ -11,7 +11,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -28,6 +30,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * Настройки — переменными окружения при старте и запросом {@code PUT /config?rate=5&burst=1&penalty=60}:
  * <ul>
  *   <li>{@code rate} — писем в секунду, 0 — без ограничения;</li>
+ *   <li>{@code domain} — если задан, предел {@code rate} и {@code burst} ставится только на получателей этого домена
+ *       и проверяется на команде RCPT, как у сервера, который отвечает за свой домен;</li>
  *   <li>{@code burst} — сколько писем можно принять залпом;</li>
  *   <li>{@code penalty} — на сколько секунд после превышения отказывать во всём (так наказывают некоторые провайдеры);</li>
  *   <li>{@code reply} — ответ на превышение.</li>
@@ -51,6 +55,12 @@ public class SmtpStub {
     private static final AtomicLong RECIPIENTS = new AtomicLong();
 
     private static final AtomicLong CONNECTIONS = new AtomicLong();
+
+    private static final Map<String, DomainBucket> DOMAIN_LIMITS = new ConcurrentHashMap<>();
+
+    private static final Map<String, AtomicLong> DOMAIN_ACCEPTED = new ConcurrentHashMap<>();
+
+    private static final Map<String, AtomicLong> DOMAIN_REJECTED = new ConcurrentHashMap<>();
 
     private static volatile double rate = parse(System.getenv("STUB_RATE"), 0);
 
@@ -89,6 +99,7 @@ public class SmtpStub {
             send(out, "220 smtp-stub ESMTP ready");
             int recipients = 0;
             boolean mailAccepted = false;
+            List<String> domains = new ArrayList<>();
             String line;
             while ((line = in.readLine()) != null) {
                 String command = line.length() >= 4 ? line.substring(0, 4).toUpperCase(Locale.ROOT) : line.toUpperCase(Locale.ROOT);
@@ -99,6 +110,7 @@ public class SmtpStub {
                     case "MAIL" -> {
                         mailAccepted = tryAcquire();
                         recipients = 0;
+                        domains.clear();
                         if (mailAccepted) {
                             send(out, "250 2.1.0 Ok");
                         } else {
@@ -107,12 +119,21 @@ public class SmtpStub {
                         }
                     }
                     case "RCPT" -> {
-                        if (mailAccepted) {
-                            recipients++;
-                            send(out, "250 2.1.5 Ok");
-                        } else {
+                        if (!mailAccepted) {
                             send(out, "503 5.5.1 Error: need MAIL command");
+                            continue;
                         }
+                        String domain = domainOf(line);
+                        DomainBucket bucket = DOMAIN_LIMITS.get(domain);
+                        if (bucket != null && !bucket.tryAcquire()) {
+                            DOMAIN_REJECTED.computeIfAbsent(domain, ignored -> new AtomicLong()).incrementAndGet();
+                            REJECTED.incrementAndGet();
+                            send(out, reply);
+                            continue;
+                        }
+                        recipients++;
+                        domains.add(domain);
+                        send(out, "250 2.1.5 Ok");
                     }
                     case "DATA" -> {
                         if (!mailAccepted || recipients == 0) {
@@ -123,6 +144,8 @@ public class SmtpStub {
                         String messageId = readMessage(in);
                         ACCEPTED.incrementAndGet();
                         RECIPIENTS.addAndGet(recipients);
+                        domains.forEach(domain -> DOMAIN_ACCEPTED.computeIfAbsent(domain, ignored -> new AtomicLong())
+                                .incrementAndGet());
                         if (messageId != null && !SEEN_MESSAGE_IDS.add(messageId)) {
                             DUPLICATES.incrementAndGet();
                         }
@@ -213,19 +236,33 @@ public class SmtpStub {
             DUPLICATES.set(0);
             RECIPIENTS.set(0);
             SEEN_MESSAGE_IDS.clear();
+            DOMAIN_ACCEPTED.clear();
+            DOMAIN_REJECTED.clear();
             respond(exchange, 200, "reset\n");
         });
         http.createContext("/config", exchange -> {
             if ("PUT".equals(exchange.getRequestMethod())) {
                 configure(query(exchange.getRequestURI().getRawQuery()));
             }
-            respond(exchange, 200, "rate=%s burst=%s penalty=%s reply=%s%n".formatted(rate, burst, penaltySeconds, reply));
+            respond(exchange, 200, "rate=%s burst=%s penalty=%s reply=%s domains=%s%n"
+                    .formatted(rate, burst, penaltySeconds, reply, DOMAIN_LIMITS));
         });
         http.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         http.start();
     }
 
     private static synchronized void configure(Map<String, String> settings) {
+        String domain = settings.get("domain");
+        if (domain != null) {
+            double domainRate = parse(settings.get("rate"), 0);
+            if (domainRate <= 0) {
+                DOMAIN_LIMITS.remove(domain);
+            } else {
+                DOMAIN_LIMITS.put(domain, new DomainBucket(domainRate, Math.max(1, parse(settings.get("burst"), 1))));
+            }
+            System.out.printf("SMTP stub: domain %s limited to %s/s%n", domain, domainRate);
+            return;
+        }
         rate = parse(settings.get("rate"), rate);
         burst = Math.max(1, parse(settings.get("burst"), burst));
         penaltySeconds = parse(settings.get("penalty"), penaltySeconds);
@@ -237,7 +274,13 @@ public class SmtpStub {
     }
 
     private static String metrics() {
-        return """
+        StringBuilder domains = new StringBuilder("# TYPE smtp_stub_domain_accepted_total counter\n");
+        DOMAIN_ACCEPTED.forEach((domain, count) -> domains.append("smtp_stub_domain_accepted_total{domain=\"%s\"} %d\n"
+                                                                          .formatted(domain, count.get())));
+        domains.append("# TYPE smtp_stub_domain_rejected_total counter\n");
+        DOMAIN_REJECTED.forEach((domain, count) -> domains.append("smtp_stub_domain_rejected_total{domain=\"%s\"} %d\n"
+                                                                          .formatted(domain, count.get())));
+        return domains + """
                 # TYPE smtp_stub_messages_accepted_total counter
                 smtp_stub_messages_accepted_total %d
                 # TYPE smtp_stub_messages_rejected_total counter
@@ -252,6 +295,48 @@ public class SmtpStub {
                 smtp_stub_rate_limit %s
                 """.formatted(ACCEPTED.get(), REJECTED.get(), DUPLICATES.get(), RECIPIENTS.get(), CONNECTIONS.get(),
                               rate);
+    }
+
+    // RCPT TO:<user@example.org> -> example.org
+    private static String domainOf(String rcpt) {
+        int at = rcpt.lastIndexOf('@');
+        int end = rcpt.indexOf('>', at);
+        return rcpt.substring(at + 1, end < 0 ? rcpt.length() : end).trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Предел темпа сервера одного домена.
+     */
+    private static final class DomainBucket {
+
+        private final double rate;
+
+        private final double burst;
+
+        private double tokens = 1;
+
+        private long refilledAt = System.nanoTime();
+
+        private DomainBucket(double rate, double burst) {
+            this.rate = rate;
+            this.burst = burst;
+        }
+
+        private synchronized boolean tryAcquire() {
+            long now = System.nanoTime();
+            tokens = Math.min(burst, tokens + (now - refilledAt) / NANOS_PER_SECOND * rate);
+            refilledAt = now;
+            if (tokens < 1) {
+                return false;
+            }
+            tokens -= 1;
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return rate + "/s";
+        }
     }
 
     private static Map<String, String> query(String raw) {

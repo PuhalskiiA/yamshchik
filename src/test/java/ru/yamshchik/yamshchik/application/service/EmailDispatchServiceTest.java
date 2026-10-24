@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.yamshchik.yamshchik.TestData;
 import ru.yamshchik.yamshchik.application.port.in.DispatchEmailsUseCase.DispatchResult;
+import ru.yamshchik.yamshchik.application.port.out.DestinationRateLimiter;
 import ru.yamshchik.yamshchik.application.port.out.DispatchQueue;
 import ru.yamshchik.yamshchik.application.port.out.EmailMetrics;
 import ru.yamshchik.yamshchik.application.port.out.EmailRepository;
@@ -19,6 +20,7 @@ import ru.yamshchik.yamshchik.application.service.ratelimit.SendRateLimiter.Perm
 import ru.yamshchik.yamshchik.application.service.ratelimit.SendSignal;
 import ru.yamshchik.yamshchik.application.service.retry.RetryPolicy;
 import ru.yamshchik.yamshchik.config.exception.type.EmailTransportException;
+import ru.yamshchik.yamshchik.config.properties.DestinationLimitProperties;
 import ru.yamshchik.yamshchik.config.properties.DispatchProperties;
 import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
 import ru.yamshchik.yamshchik.domain.Delivery;
@@ -36,6 +38,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -65,7 +68,9 @@ class EmailDispatchServiceTest {
 
     private static final String FIRST = "first@example.org";
 
-    private static final String SECOND = "second@example.org";
+    private static final String SECOND = "second@other.org";
+
+    private static final Duration UNAVAILABLE_WAIT = Duration.ofSeconds(1);
 
     @Mock
     private EmailRepository emailRepository;
@@ -91,16 +96,26 @@ class EmailDispatchServiceTest {
     @Mock
     private LeaseKeeper.Lease lease;
 
+    @Mock
+    private DestinationRateLimiter destinationLimiter;
+
     private EmailDispatchService service;
 
     @BeforeEach
     void setUp() {
+        DestinationLimitProperties destinationLimit = new DestinationLimitProperties();
+        destinationLimit.setUnavailableWait(UNAVAILABLE_WAIT);
         DispatchProperties dispatch = new DispatchProperties();
         dispatch.setLease(LEASE);
+        dispatch.setDestinationLimit(destinationLimit);
         YamshchikProperties properties = new YamshchikProperties();
         properties.setDispatch(dispatch);
         service = new EmailDispatchService(emailRepository, dispatchQueue, emailTransport, retryPolicy, rateLimiter,
-                                           leaseKeeper, metrics, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+                                           leaseKeeper, destinationLimiter, metrics, properties,
+                                           Clock.fixed(NOW, ZoneOffset.UTC));
+        // По умолчанию темп на серверы получателей ничего не ограничивает
+        lenient().when(destinationLimiter.available()).thenReturn(true);
+        lenient().when(destinationLimiter.tryAcquire(any())).thenReturn(Optional.empty());
         // По умолчанию темп не ограничивает, срочных писем нет
         lenient().when(rateLimiter.tryAcquire(any(), anyBoolean(), any()))
                 .thenAnswer(call -> Optional.of(new Permit(call.getArgument(0))));
@@ -328,6 +343,72 @@ class EmailDispatchServiceTest {
                 .overridingErrorMessage("Письмо было обработано, цикл опроса должен продолжаться")
                 .isEqualTo(DispatchResult.DISPATCHED);
         verify(dispatchQueue, never()).enqueue(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Сервер получателя сейчас не принимает по темпу: письмо возвращается в ожидание без отправки")
+    void postponedByDestinationRate() {
+        Email email = TestData.sendingEmail();
+        claimed(email, TestData.pendingDelivery(email.id(), FIRST), TestData.pendingDelivery(email.id(), SECOND));
+        when(destinationLimiter.tryAcquire(Set.of("example.org", "other.org")))
+                .thenReturn(Optional.of(Duration.ofMillis(700)));
+        when(emailRepository.savePostponed(any())).thenReturn(true);
+
+        DispatchResult result = service.dispatchNext();
+
+        assertThat(result.rateLimitedFor())
+                .overridingErrorMessage("Обработчик должен дождаться разрешения сервера, а не следующего опроса очереди")
+                .isEqualTo(Duration.ofMillis(700));
+        ArgumentCaptor<EmailState> postponed = ArgumentCaptor.forClass(EmailState.class);
+        verify(emailRepository).savePostponed(postponed.capture());
+        assertThat(postponed.getValue().status()).isEqualTo(EmailStatus.DEFERRED);
+        assertThat(postponed.getValue().attempts())
+                .overridingErrorMessage("Письмо серверу не передавалось — попытка не должна считаться")
+                .isZero();
+        assertThat(postponed.getValue().availableAt()).isEqualTo(NOW.plusMillis(700));
+        verify(dispatchQueue).enqueue(email.id(), TrafficClass.BULK, NOW.plusMillis(700));
+        verify(metrics).postponed(TrafficClass.BULK);
+        verifyNoInteractions(emailTransport);
+        verify(emailRepository, never()).saveAttemptResult(any(), anyList(), anyList());
+    }
+
+    @Test
+    @DisplayName("Счётчик темпа недоступен: письма не захватываются, рассылка ждёт")
+    void destinationLimiterUnavailable() {
+        when(destinationLimiter.available()).thenReturn(false);
+
+        DispatchResult result = service.dispatchNext();
+
+        assertThat(result.rateLimitedFor())
+                .overridingErrorMessage("Без Redis письма нельзя брать в отправку — их пришлось бы возвращать")
+                .isEqualTo(UNAVAILABLE_WAIT);
+        verify(dispatchQueue, never()).claimNext(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Redis отказал уже после захвата письма: письмо возвращается в ожидание")
+    void destinationLimiterFailsAfterClaim() {
+        Email email = TestData.sendingEmail();
+        claimed(email, TestData.pendingDelivery(email.id(), FIRST));
+        when(destinationLimiter.tryAcquire(any())).thenThrow(new IllegalStateException("redis is down"));
+        when(emailRepository.savePostponed(any())).thenReturn(true);
+
+        service.dispatchNext();
+
+        verify(dispatchQueue).enqueue(email.id(), TrafficClass.BULK, NOW.plus(UNAVAILABLE_WAIT));
+        verifyNoInteractions(emailTransport);
+    }
+
+    @Test
+    @DisplayName("Ответ сервера подстраивает темп серверов всех получателей письма")
+    void destinationsLearnFromResult() {
+        Email email = TestData.sendingEmail();
+        claimed(email, TestData.pendingDelivery(email.id(), FIRST), TestData.pendingDelivery(email.id(), SECOND));
+        when(emailRepository.saveAttemptResult(any(), anyList(), anyList())).thenReturn(true);
+
+        service.dispatchNext();
+
+        verify(destinationLimiter).onResult(Set.of("example.org", "other.org"), SendSignal.ACCEPTED);
     }
 
     private void claimed(Email email, Delivery... deliveries) {

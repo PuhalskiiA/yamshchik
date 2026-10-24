@@ -5,9 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import ru.yamshchik.yamshchik.application.port.in.ProcessDeliveryReportsUseCase;
 import ru.yamshchik.yamshchik.application.port.out.DeliveryReportSource;
+import ru.yamshchik.yamshchik.application.port.out.DestinationRateLimiter;
 import ru.yamshchik.yamshchik.application.port.out.DispatchQueue;
 import ru.yamshchik.yamshchik.application.port.out.EmailMetrics;
 import ru.yamshchik.yamshchik.application.port.out.EmailRepository;
+import ru.yamshchik.yamshchik.application.service.ratelimit.SendSignal;
 import ru.yamshchik.yamshchik.application.service.retry.RetryPolicy;
 import ru.yamshchik.yamshchik.config.properties.ReportProperties;
 import ru.yamshchik.yamshchik.config.properties.YamshchikProperties;
@@ -19,6 +21,7 @@ import ru.yamshchik.yamshchik.domain.DeliveryStatus;
 import ru.yamshchik.yamshchik.domain.EmailState;
 import ru.yamshchik.yamshchik.domain.EmailStatus;
 import ru.yamshchik.yamshchik.domain.Priority;
+import ru.yamshchik.yamshchik.domain.ReportAction;
 import ru.yamshchik.yamshchik.domain.TrafficClass;
 
 import java.time.Clock;
@@ -26,6 +29,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 
 /**
@@ -41,6 +45,8 @@ public class DeliveryReportService implements ProcessDeliveryReportsUseCase {
     // Важное письмо: если отчёт о нём не пришёл вовремя, заводится инцидент
     private static final Priority IMPORTANT_PRIORITY = Priority.HIGH;
 
+    private static final char ADDRESS_SEPARATOR = '@';
+
     private final DeliveryReportSource reportSource;
 
     private final EmailRepository emailRepository;
@@ -50,6 +56,8 @@ public class DeliveryReportService implements ProcessDeliveryReportsUseCase {
     private final RetryPolicy retryPolicy;
 
     private final EmailMetrics metrics;
+
+    private final DestinationRateLimiter destinationLimiter;
 
     private final YamshchikProperties properties;
 
@@ -123,8 +131,24 @@ public class DeliveryReportService implements ProcessDeliveryReportsUseCase {
         if (applied) {
             metrics.reportApplied(report.action(), TrafficClass.of(delivery.priority()),
                                   Duration.between(delivery.sentAt(), now));
+            slowDownIfThrottled(report);
         }
         return applied;
+    }
+
+    // Сервер получателя может отказывать по темпу уже после приёма письма своим сервером — об этом говорит отчёт
+    private void slowDownIfThrottled(DeliveryReport report) {
+        boolean notDelivered = report.action() == ReportAction.DELAYED || report.action() == ReportAction.FAILED;
+        DeliveryFailure failure = new DeliveryFailure(true, null, report.status(), report.diagnostic());
+        if (!notDelivered || SendSignal.of(failure) != SendSignal.THROTTLED) {
+            return;
+        }
+        String domain = report.recipient().substring(report.recipient().lastIndexOf(ADDRESS_SEPARATOR) + 1);
+        try {
+            destinationLimiter.onResult(Set.of(domain), SendSignal.THROTTLED);
+        } catch (RuntimeException e) {
+            log.warn("Rate of recipient server {} was not decreased after report {}", domain, report, e);
+        }
     }
 
     // Доставка ждёт отправки, а отчёт пришёл о более новой попытке: её итог не был записан

@@ -54,6 +54,14 @@ public interface EmailRepository {
     boolean saveAttemptResult(EmailState result, List<Delivery> deliveries, List<DeliveryEvent> events);
 
     /**
+     * Возвращает письмо, взятое в отправку, обратно в ожидание без отправки. Ничего не записывается,
+     * если письмо тем временем забрал другой обработчик.
+     *
+     * @return false, если письмо уже не у этого обработчика
+     */
+    boolean savePostponed(EmailState postponed);
+
+    /**
      * @return доставки письма в порядке получателей
      */
     List<Delivery> findDeliveries(EmailId id);

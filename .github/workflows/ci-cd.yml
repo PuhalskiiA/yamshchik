@@ -31,6 +31,10 @@ jobs:
       - name: Сборка
         run: sh ./mvnw -B -ntp -DskipTests package
 
+      # Скрипты темпа на сервер получателя тестируются на настоящем Redis — том же, что в стенде
+      - name: Redis для тестов
+        run: docker compose up -d --wait redis
+
       - name: Тесты
         run: sh ./mvnw -B -ntp verify
 
